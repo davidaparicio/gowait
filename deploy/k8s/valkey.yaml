@@ -1,0 +1,60 @@
+# Demo-grade single-node Valkey. For production use a managed service or a
+# proper operator (HA, persistence, backups).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gowait-valkey
+  labels:
+    app: gowait-valkey
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gowait-valkey
+  template:
+    metadata:
+      labels:
+        app: gowait-valkey
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # The valkey image's entrypoint starts as root and drops privileges;
+        # under runAsNonRoot it must be told to start as the valkey user.
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: valkey
+          image: valkey/valkey:9.1.0-alpine
+          ports:
+            - name: valkey
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: [valkey-cli, ping]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gowait-valkey
+  labels:
+    app: gowait-valkey
+spec:
+  selector:
+    app: gowait-valkey
+  ports:
+    - name: valkey
+      port: 6379
+      targetPort: valkey

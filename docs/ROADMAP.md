@@ -52,10 +52,10 @@ Protected by the existing admin key/cookie (404 when no key is configured):
 - `POST /gowait/admin/flush` — empty the queue (new `Store.Flush`; never
   boots active sessions).
 
-## Phase 5 — Multi-replica demo + Kubernetes manifests
+## Phase 5 — Multi-replica demo + Kubernetes manifests ✅
 
-- `docker-compose.multi.yml`: 2+ gowait replicas behind traefik sharing the
-  Valkey store — one queue, replica failures don't lose positions.
+- `docker-compose.multi.yml`: 2+ gowait replicas behind an nginx LB sharing
+  the Valkey store — one queue, replica failures don't lose positions.
 - `deploy/k8s/`: plain manifests with kustomize (Deployment with
   readiness/liveness on `/gowait/healthz`, Service, Ingress,
   ConfigMap/Secret, demo Valkey).

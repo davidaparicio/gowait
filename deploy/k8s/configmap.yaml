@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gowait-config
+data:
+  # Point this at the service you are protecting.
+  GOWAIT_BACKEND_URL: http://backend:80
+  GOWAIT_CAPACITY: "100"
+  GOWAIT_INACTIVITY_TTL: 60s
+  GOWAIT_QUEUE_TTL: 30s
+  GOWAIT_POLL_INTERVAL: 3s
+  # Multiple replicas require the shared Valkey store.
+  GOWAIT_STORE: valkey
+  GOWAIT_VALKEY_URL: valkey://gowait-valkey:6379
+  GOWAIT_COOKIE_SECURE: "false" # set "true" behind TLS

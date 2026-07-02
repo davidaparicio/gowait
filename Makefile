@@ -1,4 +1,4 @@
-.PHONY: build test vet lint run docker demo demo-valkey test-valkey release-snapshot clean
+.PHONY: build test vet lint run docker demo demo-valkey demo-multi test-valkey release-snapshot clean
 
 build:
 	go build -o bin/gowait ./cmd/gowait
@@ -26,6 +26,9 @@ demo:
 
 demo-valkey:
 	docker compose -f docker-compose.yml -f docker-compose.valkey.yml up --build
+
+demo-multi:
+	docker compose -f docker-compose.yml -f docker-compose.valkey.yml -f docker-compose.multi.yml up --build
 
 test-valkey:
 	docker run -d --rm --name gowait-test-valkey -p 6390:6379 valkey/valkey:9.1.0-alpine

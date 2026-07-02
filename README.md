@@ -202,6 +202,28 @@ To run the store's conformance tests against a real Valkey:
 make test-valkey
 ```
 
+### Multi-replica demo
+
+```sh
+make demo-multi
+```
+
+runs **two gowait replicas** behind an nginx load balancer
+(`deploy/nginx-lb.conf`), sharing the Valkey store. Kill one
+(`docker kill gowait-gowait-1`) — waiters keep their exact place in line,
+served by the survivor.
+
+### Kubernetes
+
+`deploy/k8s/` has plain manifests (Deployment ×2 with health probes,
+Service, Ingress, ConfigMap, Secret, demo-grade Valkey), applied with
+kustomize:
+
+```sh
+# Edit configmap.yaml (backend URL, capacity) and secret.yaml first!
+kubectl apply -k deploy/k8s
+```
+
 ## How it works
 
 - One ticket per browser, stored as `gowait_ticket` (HMAC-SHA256-signed,
