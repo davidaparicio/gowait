@@ -104,6 +104,7 @@ Flags win over environment variables, which win over defaults.
 | `-store` | `GOWAIT_STORE` | `memory` | State store: `memory` (single instance) or `valkey` (shared) |
 | `-valkey-url` | `GOWAIT_VALKEY_URL` | — | Valkey/Redis URL (`valkey://host:6379`), required with `-store=valkey` |
 | `-valkey-prefix` | `GOWAIT_VALKEY_PREFIX` | `gowait:` | Key namespace; use a `{hash-tag}:` prefix on Valkey Cluster |
+| `-metrics` | `GOWAIT_METRICS` | `true` | Expose Prometheus metrics at `/gowait/metrics` |
 
 ## Endpoints
 
@@ -118,6 +119,15 @@ gowait reserves the `/gowait/` prefix; everything else is proxied or queued.
   ```
 
 - `GET /gowait/healthz` — liveness probe for gowait itself, never queued.
+
+- `GET /gowait/metrics` — Prometheus metrics (disable with `-metrics=false`):
+  gauges `gowait_queue_length`, `gowait_active_users`, `gowait_capacity`,
+  `gowait_avg_session_seconds`; counters `gowait_admissions_total`,
+  `gowait_expirations_total`, `gowait_evictions_total`,
+  `gowait_requests_total{decision}`; histogram `gowait_wait_seconds` (time
+  spent queued before admission). Counters are fed exactly once per event, so
+  with multiple replicas `sum()` them; gauges reflect shared store state, so
+  use `max()`.
 
 ## Admin bypass
 

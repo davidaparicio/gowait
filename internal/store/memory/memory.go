@@ -98,9 +98,11 @@ func (s *Store) Touch(_ context.Context, id string, now time.Time) (bool, error)
 	return true, nil
 }
 
-func (s *Store) Reconcile(_ context.Context, capacity int, activeTTL, queueTTL time.Duration, now time.Time) (int, error) {
+func (s *Store) Reconcile(_ context.Context, capacity int, activeTTL, queueTTL time.Duration, now time.Time) (store.ReconcileResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	var res store.ReconcileResult
 
 	// 1. Expire idle actives, feeding the session-duration EMA.
 	for id, e := range s.entries {
@@ -113,6 +115,7 @@ func (s *Store) Reconcile(_ context.Context, capacity int, activeTTL, queueTTL t
 			}
 			delete(s.entries, id)
 			s.active--
+			res.Expired++
 		}
 	}
 
@@ -123,12 +126,12 @@ func (s *Store) Reconcile(_ context.Context, capacity int, activeTTL, queueTTL t
 		if now.Sub(e.lastSeen) > queueTTL {
 			s.queue.Remove(el)
 			delete(s.entries, e.id)
+			res.Evicted++
 		}
 		el = next
 	}
 
 	// 3. Promote queue heads into free slots.
-	promoted := 0
 	for s.active < capacity {
 		el := s.queue.Front()
 		if el == nil {
@@ -136,10 +139,11 @@ func (s *Store) Reconcile(_ context.Context, capacity int, activeTTL, queueTTL t
 		}
 		e := s.queue.Remove(el).(*entry)
 		e.elem = nil
+		res.WaitedSecs = append(res.WaitedSecs, now.Sub(e.enqueuedAt).Seconds())
 		s.admitLocked(e, now)
-		promoted++
+		res.Promoted++
 	}
-	return promoted, nil
+	return res, nil
 }
 
 func (s *Store) Stats(_ context.Context) (store.Stats, error) {

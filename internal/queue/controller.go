@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/davidaparicio/gowait/internal/metrics"
 	"github.com/davidaparicio/gowait/internal/store"
 )
 
@@ -40,6 +41,7 @@ type Controller struct {
 	cfg      Config
 	capacity atomic.Int64
 	now      func() time.Time
+	metrics  *metrics.Registry // nil-safe; set before serving
 }
 
 // New creates a Controller. now may be nil, in which case time.Now is used.
@@ -50,6 +52,14 @@ func New(s store.Store, cfg Config, now func() time.Time) *Controller {
 	c := &Controller{store: s, cfg: cfg, now: now}
 	c.capacity.Store(int64(cfg.Capacity))
 	return c
+}
+
+// SetMetrics attaches a metrics registry. Call before Run or serving.
+func (c *Controller) SetMetrics(r *metrics.Registry) { c.metrics = r }
+
+// Stats exposes the store's live stats (for the metrics/admin endpoints).
+func (c *Controller) Stats(ctx context.Context) (store.Stats, error) {
+	return c.store.Stats(ctx)
 }
 
 // Capacity returns the currently effective capacity.
@@ -85,11 +95,25 @@ func (c *Controller) refreshCapacity(ctx context.Context) {
 	}
 }
 
+// reconcile cranks the store's state machine and feeds the metrics registry
+// with what happened — the single funnel for all three call sites.
+func (c *Controller) reconcile(ctx context.Context, now time.Time) error {
+	res, err := c.store.Reconcile(ctx, c.Capacity(), c.cfg.ActiveTTL, c.cfg.QueueTTL, now)
+	if err != nil {
+		return err
+	}
+	c.metrics.AddReconcile(res)
+	for _, waited := range res.WaitedSecs {
+		c.metrics.ObserveAdmission(waited)
+	}
+	return nil
+}
+
 // Check is the single entry point the gatekeeper calls per proxied request:
 // reconcile, then admit/touch/enqueue the ticket as appropriate.
 func (c *Controller) Check(ctx context.Context, ticketID string) (Result, error) {
 	now := c.now()
-	if _, err := c.store.Reconcile(ctx, c.Capacity(), c.cfg.ActiveTTL, c.cfg.QueueTTL, now); err != nil {
+	if err := c.reconcile(ctx, now); err != nil {
 		return Result{}, err
 	}
 
@@ -112,6 +136,7 @@ func (c *Controller) Check(ctx context.Context, ticketID string) (Result, error)
 			return Result{}, err
 		}
 		if admitted {
+			c.metrics.ObserveAdmission(0) // free slot, no queue wait
 			snap.Status = store.StatusActive
 			snap.ActiveCount++
 			return c.result(ctx, DecisionProxy, snap)
@@ -128,7 +153,7 @@ func (c *Controller) Check(ctx context.Context, ticketID string) (Result, error)
 // heartbeat), but never enqueues.
 func (c *Controller) StatusOf(ctx context.Context, ticketID string) (Result, error) {
 	now := c.now()
-	if _, err := c.store.Reconcile(ctx, c.Capacity(), c.cfg.ActiveTTL, c.cfg.QueueTTL, now); err != nil {
+	if err := c.reconcile(ctx, now); err != nil {
 		return Result{}, err
 	}
 	snap, err := c.store.Lookup(ctx, ticketID, now)
@@ -172,7 +197,7 @@ func (c *Controller) Run(ctx context.Context) {
 			return
 		case <-t.C:
 			c.refreshCapacity(ctx)
-			_, _ = c.store.Reconcile(ctx, c.Capacity(), c.cfg.ActiveTTL, c.cfg.QueueTTL, c.now())
+			_ = c.reconcile(ctx, c.now())
 		}
 	}
 }

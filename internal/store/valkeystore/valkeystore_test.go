@@ -58,7 +58,7 @@ func newTestStore(t *testing.T) *Store {
 	prefix := fmt.Sprintf("gowait-test:%s:%d:", t.Name(), time.Now().UnixNano())
 	s := NewWithClient(client, prefix)
 	t.Cleanup(func() {
-		for _, key := range []string{s.order, s.seen, s.active, s.admitted, s.avg, s.seq, s.capacityKey} {
+		for _, key := range []string{s.order, s.seen, s.active, s.admitted, s.enqueued, s.avg, s.seq, s.capacityKey} {
 			_ = client.Do(ctx, client.B().Del().Key(key).Build()).Error()
 		}
 		client.Close()
@@ -126,12 +126,15 @@ func TestReconcileExpiresAndPromotes(t *testing.T) {
 
 	later := t0.Add(activeTTL + time.Second)
 	_, _ = s.Lookup(ctx, "b", later)
-	promoted, err := s.Reconcile(ctx, 1, activeTTL, queueTTL, later)
+	res, err := s.Reconcile(ctx, 1, activeTTL, queueTTL, later)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if promoted != 1 {
-		t.Fatalf("promoted = %d, want 1", promoted)
+	if res.Promoted != 1 || res.Expired != 1 {
+		t.Fatalf("Reconcile = %+v, want Promoted=1 Expired=1", res)
+	}
+	if len(res.WaitedSecs) != 1 || res.WaitedSecs[0] != (activeTTL+time.Second).Seconds() {
+		t.Fatalf("WaitedSecs = %v, want [%v]", res.WaitedSecs, (activeTTL + time.Second).Seconds())
 	}
 	snapA, _ := s.Lookup(ctx, "a", later)
 	if snapA.Status != store.StatusUnknown {

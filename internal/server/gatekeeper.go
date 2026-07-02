@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/davidaparicio/gowait/internal/metrics"
 	"github.com/davidaparicio/gowait/internal/queue"
 )
 
@@ -31,10 +32,12 @@ func (s *Server) gatekeeper(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, u.String(), http.StatusFound)
 				return
 			}
+			s.metrics.IncRequest(metrics.DecisionAdmin)
 			s.backend.ServeHTTP(w, r)
 			return
 		}
 		if s.isAdmin(r) {
+			s.metrics.IncRequest(metrics.DecisionAdmin)
 			s.backend.ServeHTTP(w, r)
 			return
 		}
@@ -53,12 +56,14 @@ func (s *Server) gatekeeper(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if res.Decision == queue.DecisionProxy {
+		s.metrics.IncRequest(metrics.DecisionProxied)
 		s.backend.ServeHTTP(w, r)
 		return
 	}
 
 	// Queued: humans get the waiting page in place (refresh- and
 	// deep-link-safe), API clients get honest 503 semantics.
+	s.metrics.IncRequest(metrics.DecisionQueued)
 	w.Header().Set("Cache-Control", "no-store")
 	if acceptsHTML(r) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

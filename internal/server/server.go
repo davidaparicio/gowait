@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/davidaparicio/gowait/internal/config"
+	"github.com/davidaparicio/gowait/internal/metrics"
 	"github.com/davidaparicio/gowait/internal/proxy"
 	"github.com/davidaparicio/gowait/internal/queue"
 	"github.com/davidaparicio/gowait/internal/ticket"
@@ -35,10 +36,12 @@ type Server struct {
 	backend  http.Handler
 	waitHTML []byte
 	now      func() time.Time
+	metrics  *metrics.Registry // nil-safe
 }
 
-// New builds the full gowait handler. now may be nil (defaults to time.Now).
-func New(cfg *config.Config, ctrl *queue.Controller, signer *ticket.Signer, now func() time.Time) (*Server, error) {
+// New builds the full gowait handler. now may be nil (defaults to time.Now);
+// reg may be nil (no metrics).
+func New(cfg *config.Config, ctrl *queue.Controller, signer *ticket.Signer, now func() time.Time, reg *metrics.Registry) (*Server, error) {
 	html, err := waitpage.Render(cfg.PollInterval)
 	if err != nil {
 		return nil, err
@@ -53,6 +56,7 @@ func New(cfg *config.Config, ctrl *queue.Controller, signer *ticket.Signer, now 
 		backend:  proxy.New(cfg.BackendURL, cfg.PreserveHost),
 		waitHTML: html,
 		now:      now,
+		metrics:  reg,
 	}, nil
 }
 
@@ -63,8 +67,21 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc(ownPrefix+"status", s.handleStatus)
+	if s.cfg.Metrics && s.metrics != nil {
+		mux.HandleFunc(ownPrefix+"metrics", s.handleMetrics)
+	}
 	mux.HandleFunc("/", s.gatekeeper)
 	return mux
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.ctrl.Stats(r.Context())
+	if err != nil {
+		http.Error(w, "stats unavailable", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	s.metrics.WriteTo(w, stats, s.ctrl.Capacity())
 }
 
 // --- cookie helpers ---

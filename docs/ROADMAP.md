@@ -31,7 +31,7 @@ Make capacity runtime-changeable with the store as the shared source of truth:
 - A stored override persists across restarts in Valkey mode and wins over the
   `-capacity` flag.
 
-## Phase 3 — Prometheus metrics (`/gowait/metrics`)
+## Phase 3 — Prometheus metrics (`/gowait/metrics`) ✅
 
 Hand-rolled text exposition, zero new dependencies:
 

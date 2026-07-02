@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/davidaparicio/gowait/internal/config"
+	"github.com/davidaparicio/gowait/internal/metrics"
 	"github.com/davidaparicio/gowait/internal/queue"
 	"github.com/davidaparicio/gowait/internal/server"
 	"github.com/davidaparicio/gowait/internal/store"
@@ -75,7 +76,13 @@ func run() error {
 		QueueTTL:  cfg.QueueTTL,
 	}, nil)
 
-	srv, err := server.New(cfg, ctrl, ticket.NewSigner(secret), nil)
+	var reg *metrics.Registry
+	if cfg.Metrics {
+		reg = metrics.New(version)
+		ctrl.SetMetrics(reg)
+	}
+
+	srv, err := server.New(cfg, ctrl, ticket.NewSigner(secret), nil, reg)
 	if err != nil {
 		return err
 	}

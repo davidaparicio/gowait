@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/davidaparicio/gowait/internal/config"
+	"github.com/davidaparicio/gowait/internal/metrics"
 	"github.com/davidaparicio/gowait/internal/queue"
 	"github.com/davidaparicio/gowait/internal/store/memory"
 	"github.com/davidaparicio/gowait/internal/ticket"
@@ -51,6 +52,7 @@ func newTestEnv(t *testing.T, capacity int) *testEnv {
 		QueueTTL:      30 * time.Second,
 		PollInterval:  3 * time.Second,
 		AdminKey:      "letmein",
+		Metrics:       true,
 	}
 	clk := &fakeClock{t: time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)}
 	ctrl := queue.New(memory.New(), queue.Config{
@@ -59,7 +61,9 @@ func newTestEnv(t *testing.T, capacity int) *testEnv {
 		QueueTTL:  cfg.QueueTTL,
 	}, clk.now)
 
-	srv, err := New(cfg, ctrl, ticket.NewSigner("test-secret"), clk.now)
+	reg := metrics.New("test")
+	ctrl.SetMetrics(reg)
+	srv, err := New(cfg, ctrl, ticket.NewSigner("test-secret"), clk.now, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +248,29 @@ func TestQueuedAPIClientGets503(t *testing.T) {
 	}
 	if s.Status != "queued" {
 		t.Fatalf("503 status = %q, want queued", s.Status)
+	}
+}
+
+func TestMetricsEndpoint(t *testing.T) {
+	env := newTestEnv(t, 1)
+	env.get(t, env.client(t), "/", nil) // one proxied request
+	env.get(t, env.client(t), "/", nil) // one queued request
+
+	resp, body := env.get(t, env.client(t), "/gowait/metrics", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("metrics: got %d", resp.StatusCode)
+	}
+	for _, want := range []string{
+		"gowait_active_users 1",
+		"gowait_queue_length 1",
+		"gowait_capacity 1",
+		"gowait_admissions_total 1",
+		`gowait_requests_total{decision="proxied"} 1`,
+		`gowait_requests_total{decision="queued"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics missing %q\noutput:\n%s", want, body)
+		}
 	}
 }
 

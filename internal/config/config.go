@@ -25,6 +25,7 @@ type Config struct {
 	Store         string // "memory" or "valkey"
 	ValkeyURL     string
 	ValkeyPrefix  string
+	Metrics       bool
 }
 
 // Load parses args (excluding the program name) into a Config.
@@ -44,6 +45,7 @@ func Load(args []string) (*Config, error) {
 	storeKind := fs.String("store", envOr("GOWAIT_STORE", "memory"), "state store: memory or valkey")
 	valkeyURL := fs.String("valkey-url", envOr("GOWAIT_VALKEY_URL", ""), "Valkey/Redis URL (valkey://host:port) when -store=valkey")
 	valkeyPrefix := fs.String("valkey-prefix", envOr("GOWAIT_VALKEY_PREFIX", "gowait:"), "key prefix in Valkey (use a {hash-tag}: prefix on Valkey Cluster)")
+	metricsOn := fs.Bool("metrics", envOrBool("GOWAIT_METRICS", true), "expose Prometheus metrics at /gowait/metrics")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -62,6 +64,7 @@ func Load(args []string) (*Config, error) {
 		Store:         *storeKind,
 		ValkeyURL:     *valkeyURL,
 		ValkeyPrefix:  *valkeyPrefix,
+		Metrics:       *metricsOn,
 	}
 
 	if *backend == "" {

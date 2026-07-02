@@ -37,6 +37,16 @@ type Stats struct {
 	AvgSessionSecs float64 // EMA of completed session durations; 0 = no data yet
 }
 
+// ReconcileResult reports what one Reconcile pass did. Because each event is
+// produced by exactly one Reconcile call cluster-wide, counters fed from it
+// can be summed across instances without double counting.
+type ReconcileResult struct {
+	Promoted   int       // queued users admitted into free slots
+	Expired    int       // active sessions reaped for inactivity
+	Evicted    int       // queued ghosts removed for not polling
+	WaitedSecs []float64 // time each promoted user spent queued
+}
+
 type Store interface {
 	// TryAdmit atomically admits id if ActiveCount < capacity AND the queue
 	// is empty (FIFO fairness: new arrivals never jump queued users).
@@ -59,8 +69,7 @@ type Store interface {
 	// goroutines: (1) expire actives with lastSeen older than activeTTL,
 	// (2) evict queued entries with lastSeen older than queueTTL,
 	// (3) promote queue heads while ActiveCount < capacity.
-	// Returns the number of promotions.
-	Reconcile(ctx context.Context, capacity int, activeTTL, queueTTL time.Duration, now time.Time) (int, error)
+	Reconcile(ctx context.Context, capacity int, activeTTL, queueTTL time.Duration, now time.Time) (ReconcileResult, error)
 
 	Stats(ctx context.Context) (Stats, error)
 

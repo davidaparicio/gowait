@@ -11,6 +11,7 @@
 //	<p>seen     ZSET  queued ids scored by lastSeen ms → ghost eviction
 //	<p>active   ZSET  active ids scored by lastSeen ms → idle expiry
 //	<p>admitted HASH  id → admittedAt ms, for session-duration EMA
+//	<p>enqueued HASH  id → enqueuedAt ms, for queue-wait metrics
 //	<p>avg      STRING EMA of completed session durations (seconds)
 //	<p>seq      STRING monotonic enqueue counter
 //	<p>capacity STRING runtime capacity override, absent = none
@@ -53,6 +54,7 @@ local rank = redis.call('ZRANK', KEYS[1], id)
 if not rank then
   local seq = redis.call('INCR', KEYS[4])
   redis.call('ZADD', KEYS[1], seq, id)
+  redis.call('HSET', KEYS[5], id, now)
   rank = redis.call('ZRANK', KEYS[1], id)
 end
 redis.call('ZADD', KEYS[2], now, id)
@@ -104,20 +106,24 @@ local ghosts = redis.call('ZRANGEBYSCORE', KEYS[4], '-inf', '(' .. (now - queueT
 for _, id in ipairs(ghosts) do
   redis.call('ZREM', KEYS[3], id)
   redis.call('ZREM', KEYS[4], id)
+  redis.call('HDEL', KEYS[6], id)
 end
 
--- 3. Promote queue heads into free slots.
-local promoted = 0
+-- 3. Promote queue heads into free slots, collecting queue-wait times.
+local promoted, waited = 0, {}
 while redis.call('ZCARD', KEYS[1]) < cap do
   local head = redis.call('ZPOPMIN', KEYS[3])
   if #head == 0 then break end
   local id = head[1]
   redis.call('ZREM', KEYS[4], id)
+  local enq = tonumber(redis.call('HGET', KEYS[6], id)) or now
+  redis.call('HDEL', KEYS[6], id)
   redis.call('ZADD', KEYS[1], now, id)
   redis.call('HSET', KEYS[2], id, now)
   promoted = promoted + 1
+  waited[promoted] = now - enq
 end
-return promoted
+return {promoted, #expired, #ghosts, waited}
 `)
 
 var statsScript = valkey.NewLuaScript(`
@@ -128,7 +134,7 @@ return {redis.call('ZCARD', KEYS[1]), redis.call('ZCARD', KEYS[2]),
 type Store struct {
 	client valkey.Client
 	// key names, precomputed
-	order, seen, active, admitted, avg, seq, capacityKey string
+	order, seen, active, admitted, enqueued, avg, seq, capacityKey string
 }
 
 // New connects to Valkey at url (valkey://, redis:// or plain host:port) and
@@ -155,6 +161,7 @@ func NewWithClient(client valkey.Client, prefix string) *Store {
 		seen:        prefix + "seen",
 		active:      prefix + "active",
 		admitted:    prefix + "admitted",
+		enqueued:    prefix + "enqueued",
 		avg:         prefix + "avg",
 		seq:         prefix + "seq",
 		capacityKey: prefix + "capacity",
@@ -177,7 +184,7 @@ func (s *Store) TryAdmit(ctx context.Context, id string, capacity int, now time.
 
 func (s *Store) Enqueue(ctx context.Context, id string, now time.Time) (store.Snapshot, error) {
 	res := enqueueScript.Exec(ctx, s.client,
-		[]string{s.order, s.seen, s.active, s.seq},
+		[]string{s.order, s.seen, s.active, s.seq, s.enqueued},
 		[]string{id, ms(now)})
 	return parseSnapshot(res, "Enqueue")
 }
@@ -199,19 +206,39 @@ func (s *Store) Touch(ctx context.Context, id string, now time.Time) (bool, erro
 	return n == 1, nil
 }
 
-func (s *Store) Reconcile(ctx context.Context, capacity int, activeTTL, queueTTL time.Duration, now time.Time) (int, error) {
-	n, err := reconcileScript.Exec(ctx, s.client,
-		[]string{s.active, s.admitted, s.order, s.seen, s.avg},
+func (s *Store) Reconcile(ctx context.Context, capacity int, activeTTL, queueTTL time.Duration, now time.Time) (store.ReconcileResult, error) {
+	arr, err := reconcileScript.Exec(ctx, s.client,
+		[]string{s.active, s.admitted, s.order, s.seen, s.avg, s.enqueued},
 		[]string{
 			strconv.Itoa(capacity),
 			strconv.FormatInt(activeTTL.Milliseconds(), 10),
 			strconv.FormatInt(queueTTL.Milliseconds(), 10),
 			ms(now),
-		}).AsInt64()
-	if err != nil {
-		return 0, fmt.Errorf("valkey Reconcile: %w", err)
+		}).ToArray()
+	if err != nil || len(arr) != 4 {
+		return store.ReconcileResult{}, fmt.Errorf("valkey Reconcile: %w", err)
 	}
-	return int(n), nil
+	var res store.ReconcileResult
+	counts := []*int{&res.Promoted, &res.Expired, &res.Evicted}
+	for i, dst := range counts {
+		n, err := arr[i].AsInt64()
+		if err != nil {
+			return store.ReconcileResult{}, fmt.Errorf("valkey Reconcile field %d: %w", i, err)
+		}
+		*dst = int(n)
+	}
+	waited, err := arr[3].ToArray()
+	if err != nil {
+		return store.ReconcileResult{}, fmt.Errorf("valkey Reconcile waits: %w", err)
+	}
+	for _, m := range waited {
+		msWaited, err := m.AsInt64()
+		if err != nil {
+			return store.ReconcileResult{}, fmt.Errorf("valkey Reconcile wait value: %w", err)
+		}
+		res.WaitedSecs = append(res.WaitedSecs, float64(msWaited)/1000.0)
+	}
+	return res, nil
 }
 
 func (s *Store) Stats(ctx context.Context) (store.Stats, error) {
