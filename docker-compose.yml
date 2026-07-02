@@ -1,0 +1,22 @@
+# Demo: gowait in front of a dummy backend, capacity 2.
+# Try it: docker compose up --build, then open http://localhost:8080 in three
+# browser windows (use incognito/other profiles for distinct users) — the
+# third lands in the waiting room and enters automatically when a slot frees.
+services:
+  gowait:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      GOWAIT_BACKEND_URL: http://backend:80
+      GOWAIT_CAPACITY: "2"
+      GOWAIT_INACTIVITY_TTL: 30s
+      GOWAIT_QUEUE_TTL: 15s
+      GOWAIT_POLL_INTERVAL: 3s
+      GOWAIT_ADMIN_KEY: letmein
+      GOWAIT_COOKIE_SECRET: demo-secret-change-me
+    depends_on:
+      - backend
+
+  backend:
+    image: traefik/whoami

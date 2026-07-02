@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waiting room</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f4f6f9; color: #1a2b49;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(26,43,73,.08);
+    max-width: 440px; width: 100%; padding: 48px 40px; text-align: center;
+  }
+  .glyph {
+    width: 88px; height: 88px; margin: 0 auto 28px; border-radius: 50%;
+    background: #eef2f8; display: flex; align-items: center; justify-content: center;
+    font-size: 40px;
+  }
+  h1 { font-size: 22px; margin-bottom: 12px; }
+  p.sub { color: #5a6c8a; font-size: 15px; line-height: 1.5; margin-bottom: 28px; }
+  .eta-label { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+  .eta {
+    display: inline-flex; align-items: center; gap: 12px;
+    border: 1px solid #e3e8f0; border-radius: 10px; padding: 16px 28px;
+    font-size: 26px; font-weight: 700; margin-bottom: 10px;
+  }
+  .spinner {
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 3px solid #dbe4f0; border-top-color: #3b6fe0;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .meta { color: #8494ad; font-size: 13px; margin-top: 6px; }
+  .notice {
+    margin-top: 28px; background: #eef5fd; border-radius: 8px; padding: 14px 16px;
+    font-size: 13.5px; color: #33507a; line-height: 1.5; text-align: left;
+  }
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="glyph">⏳</div>
+  <h1>You are in the waiting room</h1>
+  <p class="sub">Due to a high number of simultaneous connections, we invite you to wait in the queue. You will be let in automatically.</p>
+  <div class="eta-label">Your estimated wait time</div>
+  <div class="eta"><span class="spinner"></span><span id="eta">…</span></div>
+  <div class="meta" id="position"></div>
+  <div class="meta" id="updated"></div>
+  <div class="notice">ℹ️ Keep this page open. You will be redirected automatically to the service as soon as possible. Refreshing will not lose your place in line.</div>
+</main>
+<script>
+(function () {
+  "use strict";
+  var pollMs = {{.PollMs}};
+  var failures = 0;
+
+  function fmtEta(secs) {
+    if (secs < 60) return "< 1 minute";
+    var m = Math.ceil(secs / 60);
+    return m + (m === 1 ? " minute" : " minutes");
+  }
+
+  function tick() {
+    fetch("/gowait/status", { cache: "no-store", credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        failures = 0;
+        if (s.status === "active") { location.reload(); return; }
+        document.getElementById("eta").textContent = fmtEta(s.eta_seconds);
+        document.getElementById("position").textContent =
+          "Position " + s.position + " of " + s.queue_length + " in the queue";
+        document.getElementById("updated").textContent =
+          "Last updated at " + new Date().toLocaleTimeString();
+        if (s.poll_seconds) pollMs = s.poll_seconds * 1000;
+        schedule(pollMs);
+      })
+      .catch(function () {
+        failures++;
+        // Back off on errors, but never give up on the user.
+        schedule(Math.min(pollMs * Math.pow(2, failures), 30000));
+      });
+  }
+
+  function schedule(ms) {
+    // Small jitter so a crowd of waiters doesn't poll in lockstep.
+    setTimeout(tick, ms + Math.random() * 500);
+  }
+
+  tick();
+})();
+</script>
+</body>
+</html>
