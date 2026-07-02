@@ -22,6 +22,9 @@ type Config struct {
 	AdminKey      string
 	CookieSecure  bool
 	PreserveHost  bool
+	Store         string // "memory" or "valkey"
+	ValkeyURL     string
+	ValkeyPrefix  string
 }
 
 // Load parses args (excluding the program name) into a Config.
@@ -38,6 +41,9 @@ func Load(args []string) (*Config, error) {
 	adminKey := fs.String("admin-key", envOr("GOWAIT_ADMIN_KEY", ""), "secret key for admin queue bypass (disabled if empty)")
 	cookieSecure := fs.Bool("cookie-secure", envOrBool("GOWAIT_COOKIE_SECURE", false), "set the Secure attribute on cookies")
 	preserveHost := fs.Bool("preserve-host", envOrBool("GOWAIT_PRESERVE_HOST", false), "forward the original Host header to the backend")
+	storeKind := fs.String("store", envOr("GOWAIT_STORE", "memory"), "state store: memory or valkey")
+	valkeyURL := fs.String("valkey-url", envOr("GOWAIT_VALKEY_URL", ""), "Valkey/Redis URL (valkey://host:port) when -store=valkey")
+	valkeyPrefix := fs.String("valkey-prefix", envOr("GOWAIT_VALKEY_PREFIX", "gowait:"), "key prefix in Valkey (use a {hash-tag}: prefix on Valkey Cluster)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -53,6 +59,9 @@ func Load(args []string) (*Config, error) {
 		AdminKey:      *adminKey,
 		CookieSecure:  *cookieSecure,
 		PreserveHost:  *preserveHost,
+		Store:         *storeKind,
+		ValkeyURL:     *valkeyURL,
+		ValkeyPrefix:  *valkeyPrefix,
 	}
 
 	if *backend == "" {
@@ -83,6 +92,15 @@ func (c *Config) Validate() error {
 	}
 	if c.QueueTTL < 2*c.PollInterval {
 		return fmt.Errorf("queue-ttl (%s) must be at least 2x poll-interval (%s)", c.QueueTTL, c.PollInterval)
+	}
+	switch c.Store {
+	case "memory":
+	case "valkey":
+		if c.ValkeyURL == "" {
+			return fmt.Errorf("valkey store requires -valkey-url or GOWAIT_VALKEY_URL")
+		}
+	default:
+		return fmt.Errorf("unknown store %q: must be memory or valkey", c.Store)
 	}
 	return nil
 }

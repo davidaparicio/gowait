@@ -1,0 +1,15 @@
+# Overlay that switches the demo to the Valkey store:
+#   docker compose -f docker-compose.yml -f docker-compose.valkey.yml up --build
+# With state in Valkey, gowait itself is stateless and can run as multiple
+# replicas behind a load balancer (set the same GOWAIT_COOKIE_SECRET on all).
+services:
+  gowait:
+    environment:
+      GOWAIT_STORE: valkey
+      GOWAIT_VALKEY_URL: valkey://valkey:6379
+    depends_on:
+      - backend
+      - valkey
+
+  valkey:
+    image: valkey/valkey:9.1.0-alpine

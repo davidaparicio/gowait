@@ -16,7 +16,9 @@ import (
 	"github.com/davidaparicio/gowait/internal/config"
 	"github.com/davidaparicio/gowait/internal/queue"
 	"github.com/davidaparicio/gowait/internal/server"
+	"github.com/davidaparicio/gowait/internal/store"
 	"github.com/davidaparicio/gowait/internal/store/memory"
+	"github.com/davidaparicio/gowait/internal/store/valkeystore"
 	"github.com/davidaparicio/gowait/internal/ticket"
 )
 
@@ -40,9 +42,26 @@ func run() error {
 			return err
 		}
 		slog.Warn("GOWAIT_COOKIE_SECRET not set; generated a random one — cookies will not survive a restart")
+		if cfg.Store == "valkey" {
+			slog.Warn("valkey store with a per-instance random cookie secret: other gowait replicas will not recognize this instance's tickets — set GOWAIT_COOKIE_SECRET on all replicas")
+		}
 	}
 
-	ctrl := queue.New(memory.New(), queue.Config{
+	var st store.Store
+	switch cfg.Store {
+	case "valkey":
+		vs, err := valkeystore.New(cfg.ValkeyURL, cfg.ValkeyPrefix)
+		if err != nil {
+			return err
+		}
+		defer vs.Close()
+		slog.Info("using valkey store", "url", cfg.ValkeyURL, "prefix", cfg.ValkeyPrefix)
+		st = vs
+	default:
+		st = memory.New()
+	}
+
+	ctrl := queue.New(st, queue.Config{
 		Capacity:  cfg.Capacity,
 		ActiveTTL: cfg.InactivityTTL,
 		QueueTTL:  cfg.QueueTTL,

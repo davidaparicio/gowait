@@ -1,7 +1,8 @@
 # gowait
 
 A virtual waiting room for saturated backends, as a drop-in reverse proxy.
-Single static Go binary, standard library only.
+Single static Go binary; the only dependency is the Valkey client, used when
+you opt into shared state.
 
 When your backend can only handle N concurrent users, gowait admits the first
 N and puts everyone else in a Doctolib-style waiting room: position in line,
@@ -81,6 +82,9 @@ Flags win over environment variables, which win over defaults.
 | `-admin-key` | `GOWAIT_ADMIN_KEY` | — | Queue-bypass secret. Empty disables bypass |
 | `-cookie-secure` | `GOWAIT_COOKIE_SECURE` | `false` | Set the `Secure` cookie attribute (enable behind TLS) |
 | `-preserve-host` | `GOWAIT_PRESERVE_HOST` | `false` | Forward the original `Host` header to the backend |
+| `-store` | `GOWAIT_STORE` | `memory` | State store: `memory` (single instance) or `valkey` (shared) |
+| `-valkey-url` | `GOWAIT_VALKEY_URL` | — | Valkey/Redis URL (`valkey://host:6379`), required with `-store=valkey` |
+| `-valkey-prefix` | `GOWAIT_VALKEY_PREFIX` | `gowait:` | Key namespace; use a `{hash-tag}:` prefix on Valkey Cluster |
 
 ## Endpoints
 
@@ -104,6 +108,41 @@ signed 12-hour admin cookie:
 ```
 curl -H 'X-Gowait-Admin: <key>' https://example.com/
 open 'https://example.com/?gowait_admin=<key>'   # redirects, key stripped from URL
+```
+
+## Valkey store (multiple replicas)
+
+By default state lives in memory, which ties the waiting room to one gowait
+process. With the [Valkey](https://github.com/valkey-io/valkey) store, all
+replicas share one queue and gowait itself becomes stateless:
+
+```sh
+./bin/gowait -backend http://localhost:9000 \
+  -store valkey -valkey-url valkey://localhost:6379 \
+  -cookie-secret <same-on-every-replica>
+```
+
+Or try the demo with Valkey 9:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.valkey.yml up --build
+```
+
+Every store operation runs as a single server-side Lua script, so admissions,
+promotions and evictions stay atomic across replicas — no user can be
+double-admitted and FIFO order holds. Any Redis-compatible server works.
+Notes for production:
+
+- Set the **same `GOWAIT_COOKIE_SECRET` on all replicas**, or they will
+  reject each other's tickets.
+- On Valkey Cluster, set a prefix containing a hash tag (e.g.
+  `-valkey-prefix '{gowait}:'`) so all keys share one slot, which Lua
+  scripting requires.
+
+To run the store's conformance tests against a real Valkey:
+
+```sh
+make test-valkey
 ```
 
 ## How it works
@@ -132,8 +171,6 @@ make demo    # docker compose up --build
 
 The seams are already in place:
 
-- **Redis store** for multi-replica gowait: implement the `Store` interface
-  (`internal/store/store.go`) — each method maps to one atomic Lua script.
 - **Prometheus metrics**: wrap `Store.Stats()` under `/gowait/metrics`.
 - **Admin API** (live capacity changes, queue flush) under the reserved
   `/gowait/` prefix.

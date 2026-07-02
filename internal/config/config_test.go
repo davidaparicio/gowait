@@ -72,6 +72,8 @@ func TestValidateConstraints(t *testing.T) {
 		{"capacity < 1", []string{"-backend", "http://b:1", "-capacity", "0"}},
 		{"inactivity <= poll", []string{"-backend", "http://b:1", "-inactivity-ttl", "3s", "-poll-interval", "3s"}},
 		{"queue < 2x poll", []string{"-backend", "http://b:1", "-queue-ttl", "5s", "-poll-interval", "3s"}},
+		{"unknown store", []string{"-backend", "http://b:1", "-store", "etcd"}},
+		{"valkey without url", []string{"-backend", "http://b:1", "-store", "valkey"}},
 	}
 	for _, tc := range cases {
 		if _, err := Load(tc.args); err == nil {
