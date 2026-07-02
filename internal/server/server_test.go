@@ -31,6 +31,10 @@ type testEnv struct {
 }
 
 func newTestEnv(t *testing.T, capacity int) *testEnv {
+	return newTestEnvAdminKey(t, capacity, "letmein")
+}
+
+func newTestEnvAdminKey(t *testing.T, capacity int, adminKey string) *testEnv {
 	t.Helper()
 
 	var hits atomic.Int64
@@ -51,7 +55,7 @@ func newTestEnv(t *testing.T, capacity int) *testEnv {
 		InactivityTTL: 60 * time.Second,
 		QueueTTL:      30 * time.Second,
 		PollInterval:  3 * time.Second,
-		AdminKey:      "letmein",
+		AdminKey:      adminKey,
 		Metrics:       true,
 	}
 	clk := &fakeClock{t: time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)}
@@ -271,6 +275,113 @@ func TestMetricsEndpoint(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics missing %q\noutput:\n%s", want, body)
 		}
+	}
+}
+
+func (e *testEnv) adminReq(t *testing.T, method, path, key, body string) (*http.Response, string) {
+	t.Helper()
+	var rdr io.Reader
+	if body != "" {
+		rdr = strings.NewReader(body)
+	}
+	req, err := http.NewRequest(method, e.gowait.URL+path, rdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "" {
+		req.Header.Set("X-Gowait-Admin", key)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp, string(b)
+}
+
+func TestAdminAPIHiddenWithoutKey(t *testing.T) {
+	env := newTestEnvAdminKey(t, 1, "") // admin bypass disabled
+	resp, _ := env.adminReq(t, "GET", "/gowait/admin/stats", "", "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("stats without configured key: got %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestAdminAPIAuth(t *testing.T) {
+	env := newTestEnv(t, 2)
+
+	resp, _ := env.adminReq(t, "GET", "/gowait/admin/stats", "wrong", "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("wrong key: got %d, want 403", resp.StatusCode)
+	}
+	resp, _ = env.adminReq(t, "GET", "/gowait/admin/stats", "", "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("no credentials: got %d, want 403", resp.StatusCode)
+	}
+
+	resp, body := env.adminReq(t, "GET", "/gowait/admin/stats", "letmein", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stats: got %d %s", resp.StatusCode, body)
+	}
+	var stats struct {
+		Capacity int `json:"capacity"`
+	}
+	if err := json.Unmarshal([]byte(body), &stats); err != nil || stats.Capacity != 2 {
+		t.Fatalf("stats body %q: capacity = %d, want 2", body, stats.Capacity)
+	}
+}
+
+func TestAdminCapacityPut(t *testing.T) {
+	env := newTestEnv(t, 2)
+	env.get(t, env.client(t), "/", nil) // one active user
+
+	resp, body := env.adminReq(t, "PUT", "/gowait/admin/capacity", "letmein", `{"capacity":0}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("capacity 0: got %d %s, want 400", resp.StatusCode, body)
+	}
+
+	resp, body = env.adminReq(t, "PUT", "/gowait/admin/capacity", "letmein", `{"capacity":1}`)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"capacity":1`) {
+		t.Fatalf("capacity put: got %d %s", resp.StatusCode, body)
+	}
+
+	// Effective immediately: with capacity 1 and one active user, the next
+	// new user queues even though the configured capacity was 2.
+	resp, b := env.get(t, env.client(t), "/", nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(b, "waiting room") {
+		t.Fatalf("after capacity 1: expected waiting page, got %d", resp.StatusCode)
+	}
+}
+
+func TestAdminFlush(t *testing.T) {
+	env := newTestEnv(t, 1)
+	env.get(t, env.client(t), "/", nil) // fill the slot
+	c := env.client(t)
+	env.get(t, c, "/", nil) // C queues
+
+	resp, body := env.adminReq(t, "POST", "/gowait/admin/flush", "letmein", "")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"flushed":1`) {
+		t.Fatalf("flush: got %d %s, want flushed:1", resp.StatusCode, body)
+	}
+
+	// GET on flush must not work (state-changing operations are POST-only).
+	resp, _ = env.adminReq(t, "GET", "/gowait/admin/flush", "letmein", "")
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("GET flush: got %d, want 405", resp.StatusCode)
+	}
+
+	// The flushed user re-enters the (now empty) queue on their next request.
+	resp, b := env.get(t, c, "/", nil)
+	if !strings.Contains(b, "waiting room") {
+		t.Fatalf("flushed C: expected waiting page again, got %d", resp.StatusCode)
+	}
+	st := env.status(t, c)
+	if st.Status != "queued" || st.Position != 1 {
+		t.Fatalf("flushed C status = %+v, want queued/1", st)
 	}
 }
 

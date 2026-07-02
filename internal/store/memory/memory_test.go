@@ -139,6 +139,31 @@ func TestReconcileFeedsEMA(t *testing.T) {
 	}
 }
 
+func TestFlush(t *testing.T) {
+	s := New()
+	_, _ = s.TryAdmit(ctx, "active", 1, t0)
+	_, _ = s.Enqueue(ctx, "q1", t0)
+	_, _ = s.Enqueue(ctx, "q2", t0)
+
+	n, err := s.Flush(ctx)
+	if err != nil || n != 2 {
+		t.Fatalf("Flush = (%d, %v), want (2, nil)", n, err)
+	}
+	stats, _ := s.Stats(ctx)
+	if stats.QueueLength != 0 || stats.ActiveCount != 1 {
+		t.Fatalf("after flush: %+v, want queue 0 / active 1", stats)
+	}
+	snap, _ := s.Lookup(ctx, "q1", t0)
+	if snap.Status != store.StatusUnknown {
+		t.Fatalf("flushed q1 Status = %v, want Unknown", snap.Status)
+	}
+	// Flushed user re-enqueues cleanly at position 1.
+	snap, _ = s.Enqueue(ctx, "q1", t0.Add(time.Second))
+	if snap.Position != 1 {
+		t.Fatalf("re-enqueued q1 Position = %d, want 1", snap.Position)
+	}
+}
+
 func TestCapacityRoundTrip(t *testing.T) {
 	s := New()
 	if _, set, _ := s.GetCapacity(ctx); set {

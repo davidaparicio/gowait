@@ -170,6 +170,17 @@ func (s *Store) GetCapacity(_ context.Context) (int, bool, error) {
 	return s.capacity, s.capacitySet, nil
 }
 
+func (s *Store) Flush(_ context.Context) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := s.queue.Len()
+	for el := s.queue.Front(); el != nil; el = el.Next() {
+		delete(s.entries, el.Value.(*entry).id)
+	}
+	s.queue.Init()
+	return n, nil
+}
+
 func (s *Store) admitLocked(e *entry, now time.Time) {
 	e.status = store.StatusActive
 	e.admittedAt = now

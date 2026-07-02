@@ -126,6 +126,12 @@ end
 return {promoted, #expired, #ghosts, waited}
 `)
 
+var flushScript = valkey.NewLuaScript(`
+local n = redis.call('ZCARD', KEYS[1])
+redis.call('DEL', KEYS[1], KEYS[2], KEYS[3])
+return n
+`)
+
 var statsScript = valkey.NewLuaScript(`
 return {redis.call('ZCARD', KEYS[1]), redis.call('ZCARD', KEYS[2]),
         redis.call('GET', KEYS[3]) or ''}
@@ -262,6 +268,15 @@ func (s *Store) Stats(ctx context.Context) (store.Stats, error) {
 		}
 	}
 	return stats, nil
+}
+
+func (s *Store) Flush(ctx context.Context) (int, error) {
+	n, err := flushScript.Exec(ctx, s.client,
+		[]string{s.order, s.seen, s.enqueued}, nil).AsInt64()
+	if err != nil {
+		return 0, fmt.Errorf("valkey Flush: %w", err)
+	}
+	return int(n), nil
 }
 
 func (s *Store) SetCapacity(ctx context.Context, capacity int) error {

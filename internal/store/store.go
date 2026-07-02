@@ -82,4 +82,9 @@ type Store interface {
 	// GetCapacity returns the runtime capacity override. set=false means no
 	// override exists and the caller should use its configured value.
 	GetCapacity(ctx context.Context) (capacity int, set bool, err error)
+
+	// Flush empties the queue, returning how many entries were removed.
+	// Active sessions are never touched; flushed users become StatusUnknown
+	// and re-admit or re-enqueue on their next request.
+	Flush(ctx context.Context) (removed int, err error)
 }

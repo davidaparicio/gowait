@@ -129,6 +129,29 @@ gowait reserves the `/gowait/` prefix; everything else is proxied or queued.
   with multiple replicas `sum()` them; gauges reflect shared store state, so
   use `max()`.
 
+## Admin API
+
+With `GOWAIT_ADMIN_KEY` set, a small REST API is available under
+`/gowait/admin/` (it returns 404 when no key is configured). Authenticate
+with the `X-Gowait-Admin` header or an admin cookie:
+
+```sh
+K='X-Gowait-Admin: <key>'
+curl -H "$K" localhost:8080/gowait/admin/stats
+# {"active_users":2,"avg_session_seconds":41.3,"capacity":2,"queue_length":7}
+
+curl -X PUT -H "$K" -d '{"capacity":50}' localhost:8080/gowait/admin/capacity
+# {"capacity":50} — effective immediately, propagates to all replicas,
+# persists across restarts in Valkey mode
+
+curl -X POST -H "$K" localhost:8080/gowait/admin/flush
+# {"flushed":7} — empties the queue; active sessions are never touched,
+# flushed users re-enter the line on their next request
+```
+
+Lowering capacity never kicks active users; the room shrinks as their
+sessions expire naturally.
+
 ## Admin bypass
 
 With `GOWAIT_ADMIN_KEY` set, either of these skips the queue and sets a
@@ -167,9 +190,8 @@ Notes for production:
 - Capacity can be **changed at runtime** without a restart: the store holds a
   shared override (`<prefix>capacity` key) that every replica adopts within
   about a second. In Valkey mode the override also survives restarts and wins
-  over the `-capacity` flag. (A REST endpoint for this is on the
-  [roadmap](docs/ROADMAP.md); until then, `SET gowait:capacity N` via
-  `valkey-cli` works.)
+  over the `-capacity` flag. Change it via `PUT /gowait/admin/capacity` (see
+  [Admin API](#admin-api)).
 - On Valkey Cluster, set a prefix containing a hash tag (e.g.
   `-valkey-prefix '{gowait}:'`) so all keys share one slot, which Lua
   scripting requires.

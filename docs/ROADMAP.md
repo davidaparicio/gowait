@@ -43,7 +43,7 @@ Hand-rolled text exposition, zero new dependencies:
   time waited before admission.
 - Open by default, `-metrics=false` to disable.
 
-## Phase 4 — Admin REST API (`/gowait/admin/*`)
+## Phase 4 — Admin REST API (`/gowait/admin/*`) ✅
 
 Protected by the existing admin key/cookie (404 when no key is configured):
 

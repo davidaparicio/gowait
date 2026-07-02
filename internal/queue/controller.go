@@ -62,6 +62,12 @@ func (c *Controller) Stats(ctx context.Context) (store.Stats, error) {
 	return c.store.Stats(ctx)
 }
 
+// Flush empties the queue (admin operation). Active sessions are untouched;
+// flushed users re-admit or re-enqueue on their next request.
+func (c *Controller) Flush(ctx context.Context) (int, error) {
+	return c.store.Flush(ctx)
+}
+
 // Capacity returns the currently effective capacity.
 func (c *Controller) Capacity() int { return int(c.capacity.Load()) }
 

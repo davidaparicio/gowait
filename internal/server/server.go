@@ -70,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 	if s.cfg.Metrics && s.metrics != nil {
 		mux.HandleFunc(ownPrefix+"metrics", s.handleMetrics)
 	}
+	s.registerAdmin(mux)
 	mux.HandleFunc("/", s.gatekeeper)
 	return mux
 }
