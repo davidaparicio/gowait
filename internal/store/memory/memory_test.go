@@ -136,6 +136,20 @@ func TestReconcileFeedsEMA(t *testing.T) {
 	}
 }
 
+func TestCapacityRoundTrip(t *testing.T) {
+	s := New()
+	if _, set, _ := s.GetCapacity(ctx); set {
+		t.Fatal("fresh store reports a capacity override")
+	}
+	if err := s.SetCapacity(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	n, set, err := s.GetCapacity(ctx)
+	if err != nil || !set || n != 7 {
+		t.Fatalf("GetCapacity = (%d, %v, %v), want (7, true, nil)", n, set, err)
+	}
+}
+
 func TestConcurrentAccess(t *testing.T) {
 	s := New()
 	var wg sync.WaitGroup

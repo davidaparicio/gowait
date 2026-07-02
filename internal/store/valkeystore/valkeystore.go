@@ -3,8 +3,9 @@
 // waiting room.
 //
 // Every store.Store method runs as a single server-side Lua script, keeping
-// each operation atomic across replicas. Data model (all keys under a
-// configurable prefix):
+// each operation atomic across replicas — except Set/GetCapacity, which are
+// plain single commands (individually atomic already). Data model (all keys
+// under a configurable prefix):
 //
 //	<p>order    ZSET  queued ids scored by a monotonic sequence → FIFO + rank
 //	<p>seen     ZSET  queued ids scored by lastSeen ms → ghost eviction
@@ -12,6 +13,7 @@
 //	<p>admitted HASH  id → admittedAt ms, for session-duration EMA
 //	<p>avg      STRING EMA of completed session durations (seconds)
 //	<p>seq      STRING monotonic enqueue counter
+//	<p>capacity STRING runtime capacity override, absent = none
 package valkeystore
 
 import (
@@ -126,7 +128,7 @@ return {redis.call('ZCARD', KEYS[1]), redis.call('ZCARD', KEYS[2]),
 type Store struct {
 	client valkey.Client
 	// key names, precomputed
-	order, seen, active, admitted, avg, seq string
+	order, seen, active, admitted, avg, seq, capacityKey string
 }
 
 // New connects to Valkey at url (valkey://, redis:// or plain host:port) and
@@ -148,13 +150,14 @@ func New(url, prefix string) (*Store, error) {
 // NewWithClient wraps an existing client (useful for tests).
 func NewWithClient(client valkey.Client, prefix string) *Store {
 	return &Store{
-		client:   client,
-		order:    prefix + "order",
-		seen:     prefix + "seen",
-		active:   prefix + "active",
-		admitted: prefix + "admitted",
-		avg:      prefix + "avg",
-		seq:      prefix + "seq",
+		client:      client,
+		order:       prefix + "order",
+		seen:        prefix + "seen",
+		active:      prefix + "active",
+		admitted:    prefix + "admitted",
+		avg:         prefix + "avg",
+		seq:         prefix + "seq",
+		capacityKey: prefix + "capacity",
 	}
 }
 
@@ -232,6 +235,30 @@ func (s *Store) Stats(ctx context.Context) (store.Stats, error) {
 		}
 	}
 	return stats, nil
+}
+
+func (s *Store) SetCapacity(ctx context.Context, capacity int) error {
+	err := s.client.Do(ctx,
+		s.client.B().Set().Key(s.capacityKey).Value(strconv.Itoa(capacity)).Build()).Error()
+	if err != nil {
+		return fmt.Errorf("valkey SetCapacity: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetCapacity(ctx context.Context) (int, bool, error) {
+	v, err := s.client.Do(ctx, s.client.B().Get().Key(s.capacityKey).Build()).ToString()
+	if err != nil {
+		if valkey.IsValkeyNil(err) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("valkey GetCapacity: %w", err)
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, false, fmt.Errorf("valkey GetCapacity: bad value %q: %w", v, err)
+	}
+	return n, true, nil
 }
 
 func parseSnapshot(res valkey.ValkeyResult, op string) (store.Snapshot, error) {

@@ -155,6 +155,80 @@ func TestETAFallbackAndEMA(t *testing.T) {
 	}
 }
 
+func TestSetCapacity(t *testing.T) {
+	ctx := context.Background()
+	ctrl, _ := newTestController(5)
+
+	if err := ctrl.SetCapacity(ctx, 0); err == nil {
+		t.Fatal("SetCapacity(0) accepted, want error")
+	}
+
+	ctrl.Check(ctx, "a") // admitted, 1 of 5
+	if err := ctrl.SetCapacity(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := ctrl.Capacity(); got != 1 {
+		t.Fatalf("Capacity() = %d, want 1", got)
+	}
+	// Next new user must queue: effective capacity is now 1, not the
+	// configured 5.
+	res, _ := ctrl.Check(ctx, "b")
+	if res.Decision != DecisionWait {
+		t.Fatalf("b after SetCapacity(1): Decision = %v, want Wait", res.Decision)
+	}
+}
+
+// unsetCapStore simulates a store whose capacity override was deleted.
+type unsetCapStore struct{ *memory.Store }
+
+func (unsetCapStore) GetCapacity(context.Context) (int, bool, error) { return 0, false, nil }
+
+func TestCapacityRevertsWhenOverrideRemoved(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	st := unsetCapStore{memory.New()}
+	ctrl := New(st, Config{Capacity: 5, ActiveTTL: 60 * time.Second, QueueTTL: 30 * time.Second}, nil)
+	if err := ctrl.SetCapacity(ctx, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	go ctrl.Run(ctx) // janitor sees no override → restores the configured value
+	deadline := time.After(3 * time.Second)
+	for ctrl.Capacity() != 5 {
+		select {
+		case <-deadline:
+			t.Fatalf("Capacity() = %d after 3s, want 5 (configured)", ctrl.Capacity())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+func TestCapacityPropagatesAcrossControllers(t *testing.T) {
+	// Two controllers sharing one store simulate two gowait replicas.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	st := memory.New()
+	cfg := Config{Capacity: 5, ActiveTTL: 60 * time.Second, QueueTTL: 30 * time.Second}
+	ctrl1 := New(st, cfg, nil)
+	ctrl2 := New(st, cfg, nil)
+
+	if err := ctrl1.SetCapacity(ctx, 2); err != nil {
+		t.Fatal(err)
+	}
+	go ctrl2.Run(ctx) // janitor adopts the override
+
+	deadline := time.After(3 * time.Second)
+	for ctrl2.Capacity() != 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("ctrl2.Capacity() = %d after 3s, want 2", ctrl2.Capacity())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
 func TestJanitorPromotesWithoutTraffic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

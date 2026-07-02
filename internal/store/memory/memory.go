@@ -24,11 +24,13 @@ type entry struct {
 }
 
 type Store struct {
-	mu         sync.Mutex
-	entries    map[string]*entry
-	queue      *list.List // FIFO of *entry
-	active     int
-	avgSession float64 // seconds, EMA
+	mu          sync.Mutex
+	entries     map[string]*entry
+	queue       *list.List // FIFO of *entry
+	active      int
+	avgSession  float64 // seconds, EMA
+	capacity    int     // runtime override, valid when capacitySet
+	capacitySet bool
 }
 
 func New() *Store {
@@ -148,6 +150,20 @@ func (s *Store) Stats(_ context.Context) (store.Stats, error) {
 		ActiveCount:    s.active,
 		AvgSessionSecs: s.avgSession,
 	}, nil
+}
+
+func (s *Store) SetCapacity(_ context.Context, capacity int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.capacity = capacity
+	s.capacitySet = true
+	return nil
+}
+
+func (s *Store) GetCapacity(_ context.Context) (int, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.capacity, s.capacitySet, nil
 }
 
 func (s *Store) admitLocked(e *entry, now time.Time) {

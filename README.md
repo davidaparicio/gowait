@@ -154,6 +154,12 @@ Notes for production:
 
 - Set the **same `GOWAIT_COOKIE_SECRET` on all replicas**, or they will
   reject each other's tickets.
+- Capacity can be **changed at runtime** without a restart: the store holds a
+  shared override (`<prefix>capacity` key) that every replica adopts within
+  about a second. In Valkey mode the override also survives restarts and wins
+  over the `-capacity` flag. (A REST endpoint for this is on the
+  [roadmap](docs/ROADMAP.md); until then, `SET gowait:capacity N` via
+  `valkey-cli` works.)
 - On Valkey Cluster, set a prefix containing a hash tag (e.g.
   `-valkey-prefix '{gowait}:'`) so all keys share one slot, which Lua
   scripting requires.

@@ -63,4 +63,14 @@ type Store interface {
 	Reconcile(ctx context.Context, capacity int, activeTTL, queueTTL time.Duration, now time.Time) (int, error)
 
 	Stats(ctx context.Context) (Stats, error)
+
+	// SetCapacity stores a runtime capacity override, shared by every
+	// instance using this store. It does not change admission behavior by
+	// itself: capacity is still passed into TryAdmit/Reconcile by the
+	// caller — this is the channel through which callers learn the value.
+	SetCapacity(ctx context.Context, capacity int) error
+
+	// GetCapacity returns the runtime capacity override. set=false means no
+	// override exists and the caller should use its configured value.
+	GetCapacity(ctx context.Context) (capacity int, set bool, err error)
 }

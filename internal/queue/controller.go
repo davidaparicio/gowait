@@ -3,6 +3,8 @@ package queue
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/davidaparicio/gowait/internal/store"
@@ -25,7 +27,8 @@ type Result struct {
 	ETA         time.Duration
 }
 
-// Config holds the admission policy.
+// Config holds the admission policy. Capacity is the initial value; it can
+// change at runtime via SetCapacity or a store-side override.
 type Config struct {
 	Capacity  int
 	ActiveTTL time.Duration
@@ -33,9 +36,10 @@ type Config struct {
 }
 
 type Controller struct {
-	store store.Store
-	cfg   Config
-	now   func() time.Time
+	store    store.Store
+	cfg      Config
+	capacity atomic.Int64
+	now      func() time.Time
 }
 
 // New creates a Controller. now may be nil, in which case time.Now is used.
@@ -43,14 +47,49 @@ func New(s store.Store, cfg Config, now func() time.Time) *Controller {
 	if now == nil {
 		now = time.Now
 	}
-	return &Controller{store: s, cfg: cfg, now: now}
+	c := &Controller{store: s, cfg: cfg, now: now}
+	c.capacity.Store(int64(cfg.Capacity))
+	return c
+}
+
+// Capacity returns the currently effective capacity.
+func (c *Controller) Capacity() int { return int(c.capacity.Load()) }
+
+// SetCapacity changes the effective capacity at runtime, writing through to
+// the store so other instances sharing it pick the value up (via their
+// janitor, within about a second).
+func (c *Controller) SetCapacity(ctx context.Context, n int) error {
+	if n < 1 {
+		return fmt.Errorf("capacity must be >= 1, got %d", n)
+	}
+	if err := c.store.SetCapacity(ctx, n); err != nil {
+		return err
+	}
+	c.capacity.Store(int64(n))
+	return nil
+}
+
+// refreshCapacity adopts a store-side capacity override, if any. Called by
+// the janitor so overrides set elsewhere (another replica, a persisted value
+// from before a restart) propagate without traffic. When no override exists
+// (e.g. the key was deleted), the configured value is restored.
+func (c *Controller) refreshCapacity(ctx context.Context) {
+	n, set, err := c.store.GetCapacity(ctx)
+	switch {
+	case err != nil:
+		// Store unreachable: keep the current value.
+	case set && n >= 1:
+		c.capacity.Store(int64(n))
+	default:
+		c.capacity.Store(int64(c.cfg.Capacity))
+	}
 }
 
 // Check is the single entry point the gatekeeper calls per proxied request:
 // reconcile, then admit/touch/enqueue the ticket as appropriate.
 func (c *Controller) Check(ctx context.Context, ticketID string) (Result, error) {
 	now := c.now()
-	if _, err := c.store.Reconcile(ctx, c.cfg.Capacity, c.cfg.ActiveTTL, c.cfg.QueueTTL, now); err != nil {
+	if _, err := c.store.Reconcile(ctx, c.Capacity(), c.cfg.ActiveTTL, c.cfg.QueueTTL, now); err != nil {
 		return Result{}, err
 	}
 
@@ -68,7 +107,7 @@ func (c *Controller) Check(ctx context.Context, ticketID string) (Result, error)
 	case store.StatusQueued:
 		return c.result(ctx, DecisionWait, snap)
 	default: // StatusUnknown: new ticket, or expired one re-joining
-		admitted, err := c.store.TryAdmit(ctx, ticketID, c.cfg.Capacity, now)
+		admitted, err := c.store.TryAdmit(ctx, ticketID, c.Capacity(), now)
 		if err != nil {
 			return Result{}, err
 		}
@@ -89,7 +128,7 @@ func (c *Controller) Check(ctx context.Context, ticketID string) (Result, error)
 // heartbeat), but never enqueues.
 func (c *Controller) StatusOf(ctx context.Context, ticketID string) (Result, error) {
 	now := c.now()
-	if _, err := c.store.Reconcile(ctx, c.cfg.Capacity, c.cfg.ActiveTTL, c.cfg.QueueTTL, now); err != nil {
+	if _, err := c.store.Reconcile(ctx, c.Capacity(), c.cfg.ActiveTTL, c.cfg.QueueTTL, now); err != nil {
 		return Result{}, err
 	}
 	snap, err := c.store.Lookup(ctx, ticketID, now)
@@ -105,7 +144,7 @@ func (c *Controller) StatusOf(ctx context.Context, ticketID string) (Result, err
 		// request would be admitted right now, say "active" so the page
 		// reloads into the site; otherwise report the tail position it would
 		// get on its next request.
-		if snap.ActiveCount < c.cfg.Capacity && snap.QueueLength == 0 {
+		if snap.ActiveCount < c.Capacity() && snap.QueueLength == 0 {
 			decision = DecisionProxy
 		} else {
 			snap.Position = snap.QueueLength + 1
@@ -124,6 +163,7 @@ func (c *Controller) Run(ctx context.Context) {
 	if interval <= 0 {
 		interval = time.Second
 	}
+	c.refreshCapacity(ctx) // adopt a persisted override immediately on start
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -131,7 +171,8 @@ func (c *Controller) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			_, _ = c.store.Reconcile(ctx, c.cfg.Capacity, c.cfg.ActiveTTL, c.cfg.QueueTTL, c.now())
+			c.refreshCapacity(ctx)
+			_, _ = c.store.Reconcile(ctx, c.Capacity(), c.cfg.ActiveTTL, c.cfg.QueueTTL, c.now())
 		}
 	}
 }
@@ -157,5 +198,5 @@ func (c *Controller) eta(ctx context.Context, position int) time.Duration {
 	if stats, err := c.store.Stats(ctx); err == nil && stats.AvgSessionSecs > 0 {
 		avg = time.Duration(stats.AvgSessionSecs * float64(time.Second))
 	}
-	return time.Duration(position) * avg / time.Duration(c.cfg.Capacity)
+	return time.Duration(position) * avg / time.Duration(c.Capacity())
 }

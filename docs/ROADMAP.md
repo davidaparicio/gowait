@@ -19,7 +19,7 @@ CI (test with a real Valkey service container, lint, docker build smoke),
 goreleaser releases (multi-platform binaries + multi-arch images on
 `ghcr.io/davidaparicio/gowait`), MIT license, README badges.
 
-## Phase 2 — Dynamic capacity core
+## Phase 2 — Dynamic capacity core ✅
 
 Make capacity runtime-changeable with the store as the shared source of truth:
 

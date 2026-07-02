@@ -58,7 +58,7 @@ func newTestStore(t *testing.T) *Store {
 	prefix := fmt.Sprintf("gowait-test:%s:%d:", t.Name(), time.Now().UnixNano())
 	s := NewWithClient(client, prefix)
 	t.Cleanup(func() {
-		for _, key := range []string{s.order, s.seen, s.active, s.admitted, s.avg, s.seq} {
+		for _, key := range []string{s.order, s.seen, s.active, s.admitted, s.avg, s.seq, s.capacityKey} {
 			_ = client.Do(ctx, client.B().Del().Key(key).Build()).Error()
 		}
 		client.Close()
@@ -175,6 +175,20 @@ func TestReconcileFeedsEMA(t *testing.T) {
 	stats, _ := s.Stats(ctx)
 	if stats.AvgSessionSecs != 40 {
 		t.Fatalf("AvgSessionSecs = %v, want 40 (first sample seeds EMA)", stats.AvgSessionSecs)
+	}
+}
+
+func TestCapacityRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	if _, set, _ := s.GetCapacity(ctx); set {
+		t.Fatal("fresh store reports a capacity override")
+	}
+	if err := s.SetCapacity(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	n, set, err := s.GetCapacity(ctx)
+	if err != nil || !set || n != 7 {
+		t.Fatalf("GetCapacity = (%d, %v, %v), want (7, true, nil)", n, set, err)
 	}
 }
 
