@@ -28,6 +28,16 @@ var (
 	queueTTL  = 30 * time.Second
 )
 
+// skipOrFail skips locally when Valkey is missing, but fails in CI: there a
+// service container is expected, and a silent skip would drop coverage.
+func skipOrFail(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("CI") != "" {
+		t.Fatalf(format, args...)
+	}
+	t.Skipf(format, args...)
+}
+
 // newTestStore returns a Store with a unique key prefix per test, or skips
 // if no Valkey is reachable.
 func newTestStore(t *testing.T) *Store {
@@ -38,11 +48,11 @@ func newTestStore(t *testing.T) *Store {
 	}
 	client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}})
 	if err != nil {
-		t.Skipf("no Valkey at %s: %v (set GOWAIT_TEST_VALKEY_URL or start one)", addr, err)
+		skipOrFail(t, "no Valkey at %s: %v (set GOWAIT_TEST_VALKEY_URL or start one)", addr, err)
 	}
 	if err := client.Do(ctx, client.B().Ping().Build()).Error(); err != nil {
 		client.Close()
-		t.Skipf("Valkey at %s not answering: %v", addr, err)
+		skipOrFail(t, "Valkey at %s not answering: %v", addr, err)
 	}
 
 	prefix := fmt.Sprintf("gowait-test:%s:%d:", t.Name(), time.Now().UnixNano())

@@ -1,4 +1,4 @@
-.PHONY: build test vet run docker demo clean
+.PHONY: build test vet lint run docker demo demo-valkey test-valkey release-snapshot clean
 
 build:
 	go build -o bin/gowait ./cmd/gowait
@@ -8,6 +8,12 @@ test:
 
 vet:
 	go vet ./...
+
+lint:
+	golangci-lint run
+
+release-snapshot:
+	goreleaser release --snapshot --clean
 
 run: build
 	./bin/gowait -backend $${GOWAIT_BACKEND_URL:-http://localhost:9000}

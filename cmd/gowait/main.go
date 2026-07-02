@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,7 +23,14 @@ import (
 	"github.com/davidaparicio/gowait/internal/ticket"
 )
 
+// version is set at release time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "-version" {
+		fmt.Println("gowait", version)
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("gowait exited", "err", err)
 		os.Exit(1)
@@ -86,6 +94,7 @@ func run() error {
 	errCh := make(chan error, 1)
 	go func() {
 		slog.Info("gowait listening",
+			"version", version,
 			"addr", cfg.Listen,
 			"backend", cfg.BackendURL.String(),
 			"capacity", cfg.Capacity,

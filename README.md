@@ -1,5 +1,11 @@
 # gowait
 
+[![CI](https://github.com/davidaparicio/gowait/actions/workflows/ci.yml/badge.svg)](https://github.com/davidaparicio/gowait/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/davidaparicio/gowait)](https://github.com/davidaparicio/gowait/releases)
+[![ghcr.io](https://img.shields.io/badge/ghcr.io-davidaparicio%2Fgowait-blue)](https://github.com/davidaparicio/gowait/pkgs/container/gowait)
+[![Go Report Card](https://goreportcard.com/badge/github.com/davidaparicio/gowait)](https://goreportcard.com/report/github.com/davidaparicio/gowait)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A virtual waiting room for saturated backends, as a drop-in reverse proxy.
 Single static Go binary; the only dependency is the Valkey client, used when
 you opt into shared state.
@@ -31,6 +37,19 @@ User ──▶ gowait ──▶ Backend
   removed, so the line keeps moving.
 - **Honest to machines**: non-HTML clients get `503` + `Retry-After` and a
   JSON body instead of an HTML page.
+
+## Install
+
+```sh
+# Container image (multi-arch)
+docker pull ghcr.io/davidaparicio/gowait:latest
+
+# From source
+go install github.com/davidaparicio/gowait/cmd/gowait@latest
+```
+
+Prebuilt binaries for Linux, macOS and Windows are on the
+[releases page](https://github.com/davidaparicio/gowait/releases).
 
 ## Quickstart
 
@@ -167,10 +186,9 @@ make vet
 make demo    # docker compose up --build
 ```
 
-## Future work
+## Roadmap
 
-The seams are already in place:
-
-- **Prometheus metrics**: wrap `Store.Stats()` under `/gowait/metrics`.
-- **Admin API** (live capacity changes, queue flush) under the reserved
-  `/gowait/` prefix.
+See [docs/ROADMAP.md](docs/ROADMAP.md): Prometheus metrics, admin API (live
+capacity changes, queue flush), multi-replica + Kubernetes manifests, waiting
+page branding/i18n, adaptive capacity via backend health probing, load
+testing. The seams are already in place.

@@ -1,0 +1,6 @@
+# Used by goreleaser: reuses the release binary instead of rebuilding.
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY gowait /gowait
+EXPOSE 8080
+USER nonroot
+ENTRYPOINT ["/gowait"]

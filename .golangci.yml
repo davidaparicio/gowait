@@ -1,0 +1,12 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - misspell
+    - unconvert
+  exclusions:
+    rules:
+      # Deliberate fire-and-forget calls while arranging test state.
+      - path: _test\.go
+        linters: [errcheck]
