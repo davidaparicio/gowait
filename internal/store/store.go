@@ -88,3 +88,13 @@ type Store interface {
 	// and re-admit or re-enqueue on their next request.
 	Flush(ctx context.Context) (removed int, err error)
 }
+
+// Locker is an optional interface a Store may implement to coordinate
+// singleton work across replicas (e.g. the health prober's capacity
+// adjuster). TryLock acquires the named lease for ttl if it is free. There
+// is deliberately no unlock: leases expire on their own, so a crashed
+// holder stalls the work for at most one ttl. Single-instance stores simply
+// don't implement it — callers treat a missing Locker as "no contention".
+type Locker interface {
+	TryLock(ctx context.Context, name string, ttl time.Duration) (bool, error)
+}

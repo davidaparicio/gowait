@@ -15,6 +15,7 @@
 //	<p>avg      STRING EMA of completed session durations (seconds)
 //	<p>seq      STRING monotonic enqueue counter
 //	<p>capacity STRING runtime capacity override, absent = none
+//	<p>lock:<n> STRING SET NX PX lease for singleton work (store.Locker)
 package valkeystore
 
 import (
@@ -140,8 +141,11 @@ return {redis.call('ZCARD', KEYS[1]), redis.call('ZCARD', KEYS[2]),
 type Store struct {
 	client valkey.Client
 	// key names, precomputed
-	order, seen, active, admitted, enqueued, avg, seq, capacityKey string
+	order, seen, active, admitted, enqueued, avg, seq, capacityKey, lockPrefix string
 }
+
+// Store also provides cross-replica leases (see TryLock).
+var _ store.Locker = (*Store)(nil)
 
 // New connects to Valkey at url (valkey://, redis:// or plain host:port) and
 // namespaces all keys under prefix. For Valkey Cluster, use a prefix with a
@@ -171,6 +175,7 @@ func NewWithClient(client valkey.Client, prefix string) *Store {
 		avg:         prefix + "avg",
 		seq:         prefix + "seq",
 		capacityKey: prefix + "capacity",
+		lockPrefix:  prefix + "lock:",
 	}
 }
 
@@ -301,6 +306,20 @@ func (s *Store) GetCapacity(ctx context.Context) (int, bool, error) {
 		return 0, false, fmt.Errorf("valkey GetCapacity: bad value %q: %w", v, err)
 	}
 	return n, true, nil
+}
+
+// TryLock implements store.Locker with SET NX PX: the lease is acquired iff
+// the key does not exist, and auto-expires after ttl.
+func (s *Store) TryLock(ctx context.Context, name string, ttl time.Duration) (bool, error) {
+	err := s.client.Do(ctx,
+		s.client.B().Set().Key(s.lockPrefix+name).Value("1").Nx().Px(ttl).Build()).Error()
+	if err != nil {
+		if valkey.IsValkeyNil(err) {
+			return false, nil // held by someone else
+		}
+		return false, fmt.Errorf("valkey TryLock: %w", err)
+	}
+	return true, nil
 }
 
 func parseSnapshot(res valkey.ValkeyResult, op string) (store.Snapshot, error) {

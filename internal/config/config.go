@@ -34,6 +34,10 @@ type Config struct {
 	WaitMessage   string
 	WaitLang      string // "en" or "fr"
 	WaitTemplate  string // path to a custom waiting page template
+	ProbeURL      string // backend health URL; empty disables the prober
+	ProbeInterval time.Duration
+	ProbeMin      int // capacity floor for the prober
+	ProbeMax      int // capacity ceiling; 0 = the -capacity value
 }
 
 // Load parses args (excluding the program name) into a Config.
@@ -59,6 +63,10 @@ func Load(args []string) (*Config, error) {
 	waitMessage := fs.String("wait-message", envOr("GOWAIT_WAIT_MESSAGE", ""), "waiting page message (localized default if empty)")
 	waitLang := fs.String("wait-lang", envOr("GOWAIT_WAIT_LANG", "en"), "waiting page language: "+strings.Join(waitpage.Langs(), " or "))
 	waitTemplate := fs.String("wait-template", envOr("GOWAIT_WAIT_TEMPLATE", ""), "path to a custom waiting page html/template (embedded page if empty)")
+	probeURL := fs.String("probe-url", envOr("GOWAIT_PROBE_URL", ""), "backend health URL enabling the adaptive-capacity prober (off if empty)")
+	probeInterval := fs.Duration("probe-interval", envOrDuration("GOWAIT_PROBE_INTERVAL", 10*time.Second), "health probe cadence, also the probe timeout")
+	probeMin := fs.Int("probe-min", envOrInt("GOWAIT_PROBE_MIN", 1), "capacity floor for the prober")
+	probeMax := fs.Int("probe-max", envOrInt("GOWAIT_PROBE_MAX", 0), "capacity ceiling for the prober (0 = the -capacity value)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -83,6 +91,13 @@ func Load(args []string) (*Config, error) {
 		WaitMessage:   *waitMessage,
 		WaitLang:      *waitLang,
 		WaitTemplate:  *waitTemplate,
+		ProbeURL:      *probeURL,
+		ProbeInterval: *probeInterval,
+		ProbeMin:      *probeMin,
+		ProbeMax:      *probeMax,
+	}
+	if cfg.ProbeMax == 0 {
+		cfg.ProbeMax = cfg.Capacity
 	}
 
 	if *backend == "" {
@@ -125,6 +140,21 @@ func (c *Config) Validate() error {
 	}
 	if !waitpage.SupportedLang(c.WaitLang) {
 		return fmt.Errorf("unknown wait-lang %q: must be %s", c.WaitLang, strings.Join(waitpage.Langs(), " or "))
+	}
+	if c.ProbeURL != "" {
+		u, err := url.Parse(c.ProbeURL)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("invalid probe-url %q: must be absolute, e.g. http://backend:8080/healthz", c.ProbeURL)
+		}
+		if c.ProbeInterval <= 0 {
+			return fmt.Errorf("probe-interval must be > 0, got %s", c.ProbeInterval)
+		}
+		if c.ProbeMin < 1 {
+			return fmt.Errorf("probe-min must be >= 1, got %d", c.ProbeMin)
+		}
+		if c.ProbeMax < c.ProbeMin {
+			return fmt.Errorf("probe-max (%d) must be >= probe-min (%d)", c.ProbeMax, c.ProbeMin)
+		}
 	}
 	return nil
 }

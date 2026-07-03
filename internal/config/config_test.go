@@ -81,6 +81,22 @@ func TestLoadWaitPageOptions(t *testing.T) {
 	}
 }
 
+func TestLoadProbeOptions(t *testing.T) {
+	cfg, err := Load([]string{"-backend", "http://b:1", "-capacity", "50", "-probe-url", "http://b:1/healthz"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ProbeInterval != 10*time.Second {
+		t.Errorf("ProbeInterval = %s, want 10s", cfg.ProbeInterval)
+	}
+	if cfg.ProbeMin != 1 {
+		t.Errorf("ProbeMin = %d, want 1", cfg.ProbeMin)
+	}
+	if cfg.ProbeMax != 50 {
+		t.Errorf("ProbeMax = %d, want 50 (defaults to -capacity)", cfg.ProbeMax)
+	}
+}
+
 func TestValidateConstraints(t *testing.T) {
 	cases := []struct {
 		name string
@@ -92,6 +108,10 @@ func TestValidateConstraints(t *testing.T) {
 		{"unknown store", []string{"-backend", "http://b:1", "-store", "etcd"}},
 		{"valkey without url", []string{"-backend", "http://b:1", "-store", "valkey"}},
 		{"unknown wait-lang", []string{"-backend", "http://b:1", "-wait-lang", "de"}},
+		{"relative probe-url", []string{"-backend", "http://b:1", "-probe-url", "/healthz"}},
+		{"probe-min < 1", []string{"-backend", "http://b:1", "-probe-url", "http://b:1/healthz", "-probe-min", "0"}},
+		{"probe-max < probe-min", []string{"-backend", "http://b:1", "-probe-url", "http://b:1/healthz", "-probe-min", "5", "-probe-max", "2"}},
+		{"probe-interval <= 0", []string{"-backend", "http://b:1", "-probe-url", "http://b:1/healthz", "-probe-interval", "0s"}},
 	}
 	for _, tc := range cases {
 		if _, err := Load(tc.args); err == nil {

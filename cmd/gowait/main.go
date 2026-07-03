@@ -16,6 +16,7 @@ import (
 
 	"github.com/davidaparicio/gowait/internal/config"
 	"github.com/davidaparicio/gowait/internal/metrics"
+	"github.com/davidaparicio/gowait/internal/prober"
 	"github.com/davidaparicio/gowait/internal/queue"
 	"github.com/davidaparicio/gowait/internal/server"
 	"github.com/davidaparicio/gowait/internal/store"
@@ -91,6 +92,23 @@ func run() error {
 	defer stop()
 
 	go ctrl.Run(ctx) // janitor: drains the queue even with zero traffic
+
+	if cfg.ProbeURL != "" {
+		locker, _ := st.(store.Locker) // nil for the memory store: no coordination needed
+		pr := prober.New(prober.Config{
+			URL:      cfg.ProbeURL,
+			Interval: cfg.ProbeInterval,
+			Min:      cfg.ProbeMin,
+			Max:      cfg.ProbeMax,
+		}, ctrl, locker)
+		go pr.Run(ctx)
+		slog.Info("backend health prober enabled",
+			"url", cfg.ProbeURL,
+			"interval", cfg.ProbeInterval,
+			"capacity_min", cfg.ProbeMin,
+			"capacity_max", cfg.ProbeMax,
+			"distributed_lock", locker != nil)
+	}
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Listen,

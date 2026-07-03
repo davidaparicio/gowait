@@ -110,6 +110,10 @@ Flags win over environment variables, which win over defaults.
 | `-wait-brand` | `GOWAIT_WAIT_BRAND` | — | Brand name shown above the heading (hidden if empty) |
 | `-wait-message` | `GOWAIT_WAIT_MESSAGE` | localized | Waiting page explanation paragraph |
 | `-wait-template` | `GOWAIT_WAIT_TEMPLATE` | embedded | Path to a custom waiting page template |
+| `-probe-url` | `GOWAIT_PROBE_URL` | — | Backend health URL enabling the adaptive-capacity prober |
+| `-probe-interval` | `GOWAIT_PROBE_INTERVAL` | `10s` | Health probe cadence (also the probe timeout and lock lease) |
+| `-probe-min` | `GOWAIT_PROBE_MIN` | `1` | Capacity floor for the prober |
+| `-probe-max` | `GOWAIT_PROBE_MAX` | `-capacity` | Capacity ceiling for the prober |
 
 ## Waiting page customization
 
@@ -185,6 +189,28 @@ curl -X POST -H "$K" localhost:8080/gowait/admin/flush
 
 Lowering capacity never kicks active users; the room shrinks as their
 sessions expire naturally.
+
+## Adaptive capacity (health prober)
+
+Off by default. With `-probe-url` set, gowait probes the backend's health
+endpoint every `-probe-interval` and adjusts capacity with AIMD:
+
+- **Probe fails** (connection error, timeout, or HTTP ≥ 400): capacity is
+  **halved** immediately — a struggling backend sheds load fast.
+- **Three consecutive successes** (HTTP 200–399): capacity grows by **+1** —
+  recovery is deliberately gradual.
+- Capacity always stays within `[-probe-min, -probe-max]`.
+
+```sh
+./bin/gowait -backend http://backend:8080 -capacity 100 \
+  -probe-url http://backend:8080/healthz -probe-interval 10s -probe-min 10
+```
+
+Adjustments go through the same store-backed channel as
+`PUT /gowait/admin/capacity`, so every replica adopts them within about a
+second, and lowering capacity never kicks active users. With the Valkey
+store, a `SET NX PX` lease ensures only one replica probes and adjusts per
+interval, whichever grabs it first.
 
 ## Admin bypass
 

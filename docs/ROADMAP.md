@@ -69,12 +69,13 @@ Protected by the existing admin key/cookie (404 when no key is configured):
 - Constraints kept: rendered once at startup (misconfiguration fails fast),
   zero external assets, user strings HTML-escaped.
 
-## Phase 7 — Backend health prober (adaptive capacity)
+## Phase 7 — Backend health prober (adaptive capacity) ✅
 
-Optional, off by default. Probes a backend health URL and adjusts capacity
-between configured min/max bounds with AIMD (halve on failure, +1 after 3
-consecutive successes) via the Phase 2 mechanism. In Valkey mode a `SET NX PX`
-lock ensures one adjuster per interval across replicas.
+Optional, off by default. Probes a backend health URL (`-probe-url`, every
+`-probe-interval`) and adjusts capacity between `-probe-min`/`-probe-max`
+bounds with AIMD (halve on failure, +1 after 3 consecutive successes) via the
+Phase 2 mechanism. In Valkey mode a `SET NX PX` lock (the new optional
+`store.Locker` interface) ensures one adjuster per interval across replicas.
 
 ## Phase 8 — Load test + tuning
 

@@ -247,3 +247,24 @@ func TestConcurrentAccess(t *testing.T) {
 		t.Fatalf("active+queued = %d, want 50", stats.ActiveCount+stats.QueueLength)
 	}
 }
+
+func TestTryLock(t *testing.T) {
+	s := newTestStore(t)
+	ok, err := s.TryLock(ctx, "prober", 100*time.Millisecond)
+	if err != nil || !ok {
+		t.Fatalf("first TryLock = (%v, %v), want (true, nil)", ok, err)
+	}
+	ok, err = s.TryLock(ctx, "prober", 100*time.Millisecond)
+	if err != nil || ok {
+		t.Fatalf("second TryLock = (%v, %v), want (false, nil) while held", ok, err)
+	}
+	ok, err = s.TryLock(ctx, "other", 100*time.Millisecond)
+	if err != nil || !ok {
+		t.Fatalf("TryLock on another name = (%v, %v), want (true, nil)", ok, err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	ok, err = s.TryLock(ctx, "prober", 100*time.Millisecond)
+	if err != nil || !ok {
+		t.Fatalf("TryLock after expiry = (%v, %v), want (true, nil)", ok, err)
+	}
+}
