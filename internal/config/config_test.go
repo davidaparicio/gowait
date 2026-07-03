@@ -64,6 +64,23 @@ func TestLoadFlagBeatsEnv(t *testing.T) {
 	}
 }
 
+func TestLoadWaitPageOptions(t *testing.T) {
+	t.Setenv("GOWAIT_WAIT_BRAND", "ACME")
+	cfg, err := Load([]string{"-backend", "http://b:1", "-wait-lang", "fr", "-wait-title", "High demand"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WaitLang != "fr" {
+		t.Errorf("WaitLang = %q, want fr", cfg.WaitLang)
+	}
+	if cfg.WaitTitle != "High demand" {
+		t.Errorf("WaitTitle = %q, want High demand", cfg.WaitTitle)
+	}
+	if cfg.WaitBrand != "ACME" {
+		t.Errorf("WaitBrand = %q, want ACME (from env)", cfg.WaitBrand)
+	}
+}
+
 func TestValidateConstraints(t *testing.T) {
 	cases := []struct {
 		name string
@@ -74,6 +91,7 @@ func TestValidateConstraints(t *testing.T) {
 		{"queue < 2x poll", []string{"-backend", "http://b:1", "-queue-ttl", "5s", "-poll-interval", "3s"}},
 		{"unknown store", []string{"-backend", "http://b:1", "-store", "etcd"}},
 		{"valkey without url", []string{"-backend", "http://b:1", "-store", "valkey"}},
+		{"unknown wait-lang", []string{"-backend", "http://b:1", "-wait-lang", "de"}},
 	}
 	for _, tc := range cases {
 		if _, err := Load(tc.args); err == nil {

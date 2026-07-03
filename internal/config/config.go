@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"time"
+
+	"github.com/davidaparicio/gowait/internal/waitpage"
 )
 
 // Config holds all runtime settings for gowait.
@@ -26,6 +29,11 @@ type Config struct {
 	ValkeyURL     string
 	ValkeyPrefix  string
 	Metrics       bool
+	WaitTitle     string
+	WaitBrand     string
+	WaitMessage   string
+	WaitLang      string // "en" or "fr"
+	WaitTemplate  string // path to a custom waiting page template
 }
 
 // Load parses args (excluding the program name) into a Config.
@@ -46,6 +54,11 @@ func Load(args []string) (*Config, error) {
 	valkeyURL := fs.String("valkey-url", envOr("GOWAIT_VALKEY_URL", ""), "Valkey/Redis URL (valkey://host:port) when -store=valkey")
 	valkeyPrefix := fs.String("valkey-prefix", envOr("GOWAIT_VALKEY_PREFIX", "gowait:"), "key prefix in Valkey (use a {hash-tag}: prefix on Valkey Cluster)")
 	metricsOn := fs.Bool("metrics", envOrBool("GOWAIT_METRICS", true), "expose Prometheus metrics at /gowait/metrics")
+	waitTitle := fs.String("wait-title", envOr("GOWAIT_WAIT_TITLE", ""), "waiting page title (localized default if empty)")
+	waitBrand := fs.String("wait-brand", envOr("GOWAIT_WAIT_BRAND", ""), "brand name shown on the waiting page (hidden if empty)")
+	waitMessage := fs.String("wait-message", envOr("GOWAIT_WAIT_MESSAGE", ""), "waiting page message (localized default if empty)")
+	waitLang := fs.String("wait-lang", envOr("GOWAIT_WAIT_LANG", "en"), "waiting page language: "+strings.Join(waitpage.Langs(), " or "))
+	waitTemplate := fs.String("wait-template", envOr("GOWAIT_WAIT_TEMPLATE", ""), "path to a custom waiting page html/template (embedded page if empty)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -65,6 +78,11 @@ func Load(args []string) (*Config, error) {
 		ValkeyURL:     *valkeyURL,
 		ValkeyPrefix:  *valkeyPrefix,
 		Metrics:       *metricsOn,
+		WaitTitle:     *waitTitle,
+		WaitBrand:     *waitBrand,
+		WaitMessage:   *waitMessage,
+		WaitLang:      *waitLang,
+		WaitTemplate:  *waitTemplate,
 	}
 
 	if *backend == "" {
@@ -104,6 +122,9 @@ func (c *Config) Validate() error {
 		}
 	default:
 		return fmt.Errorf("unknown store %q: must be memory or valkey", c.Store)
+	}
+	if !waitpage.SupportedLang(c.WaitLang) {
+		return fmt.Errorf("unknown wait-lang %q: must be %s", c.WaitLang, strings.Join(waitpage.Langs(), " or "))
 	}
 	return nil
 }

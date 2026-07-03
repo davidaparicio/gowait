@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{.Lang}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Waiting room</title>
+<title>{{if .Brand}}{{.Brand}} — {{end}}{{.Title}}</title>
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -37,6 +37,10 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   .meta { color: #8494ad; font-size: 13px; margin-top: 6px; }
+  .brand {
+    color: #8494ad; font-size: 13px; font-weight: 600;
+    letter-spacing: .08em; text-transform: uppercase; margin-bottom: 18px;
+  }
   .notice {
     margin-top: 28px; background: #eef5fd; border-radius: 8px; padding: 14px 16px;
     font-size: 13.5px; color: #33507a; line-height: 1.5; text-align: left;
@@ -45,25 +49,33 @@
 </head>
 <body>
 <main class="card">
+  {{if .Brand}}<div class="brand">{{.Brand}}</div>{{end}}
   <div class="glyph">⏳</div>
-  <h1>You are in the waiting room</h1>
-  <p class="sub">Due to a high number of simultaneous connections, we invite you to wait in the queue. You will be let in automatically.</p>
-  <div class="eta-label">Your estimated wait time</div>
+  <h1>{{.Title}}</h1>
+  <p class="sub">{{.Message}}</p>
+  <div class="eta-label">{{.L.EtaLabel}}</div>
   <div class="eta"><span class="spinner"></span><span id="eta">…</span></div>
   <div class="meta" id="position"></div>
   <div class="meta" id="updated"></div>
-  <div class="notice">ℹ️ Keep this page open. You will be redirected automatically to the service as soon as possible. Refreshing will not lose your place in line.</div>
+  <div class="notice">ℹ️ {{.L.Notice}}</div>
 </main>
 <script>
 (function () {
   "use strict";
   var pollMs = {{.PollMs}};
   var failures = 0;
+  var L = {
+    lessMin: {{.L.LessMinute}},
+    minute: {{.L.Minute}},
+    minutes: {{.L.Minutes}},
+    position: {{.L.Position}},
+    updated: {{.L.Updated}}
+  };
 
   function fmtEta(secs) {
-    if (secs < 60) return "< 1 minute";
+    if (secs < 60) return L.lessMin;
     var m = Math.ceil(secs / 60);
-    return m + (m === 1 ? " minute" : " minutes");
+    return m + " " + (m === 1 ? L.minute : L.minutes);
   }
 
   function tick() {
@@ -74,9 +86,9 @@
         if (s.status === "active") { location.reload(); return; }
         document.getElementById("eta").textContent = fmtEta(s.eta_seconds);
         document.getElementById("position").textContent =
-          "Position " + s.position + " of " + s.queue_length + " in the queue";
+          L.position.replace("{pos}", s.position).replace("{len}", s.queue_length);
         document.getElementById("updated").textContent =
-          "Last updated at " + new Date().toLocaleTimeString();
+          L.updated.replace("{time}", new Date().toLocaleTimeString());
         if (s.poll_seconds) pollMs = s.poll_seconds * 1000;
         schedule(pollMs);
       })

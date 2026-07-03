@@ -60,11 +60,14 @@ Protected by the existing admin key/cookie (404 when no key is configured):
   readiness/liveness on `/gowait/healthz`, Service, Ingress,
   ConfigMap/Secret, demo Valkey).
 
-## Phase 6 — Waiting page customization
+## Phase 6 — Waiting page customization ✅
 
-- Config for title, brand, message, and language (English/French to start).
-- `-wait-template` to override the embedded page with your own file.
-- Constraints kept: rendered once at startup, zero external assets.
+- Config for title, brand, message, and language (English/French to start):
+  `-wait-title`, `-wait-brand`, `-wait-message`, `-wait-lang`.
+- `-wait-template` to override the embedded page with your own file (gets the
+  same data: `.Title`, `.Brand`, `.Message`, `.Lang`, `.PollMs`, `.L` strings).
+- Constraints kept: rendered once at startup (misconfiguration fails fast),
+  zero external assets, user strings HTML-escaped.
 
 ## Phase 7 — Backend health prober (adaptive capacity)
 

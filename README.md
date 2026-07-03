@@ -105,6 +105,40 @@ Flags win over environment variables, which win over defaults.
 | `-valkey-url` | `GOWAIT_VALKEY_URL` | — | Valkey/Redis URL (`valkey://host:6379`), required with `-store=valkey` |
 | `-valkey-prefix` | `GOWAIT_VALKEY_PREFIX` | `gowait:` | Key namespace; use a `{hash-tag}:` prefix on Valkey Cluster |
 | `-metrics` | `GOWAIT_METRICS` | `true` | Expose Prometheus metrics at `/gowait/metrics` |
+| `-wait-lang` | `GOWAIT_WAIT_LANG` | `en` | Waiting page language: `en` or `fr` |
+| `-wait-title` | `GOWAIT_WAIT_TITLE` | localized | Waiting page title/heading |
+| `-wait-brand` | `GOWAIT_WAIT_BRAND` | — | Brand name shown above the heading (hidden if empty) |
+| `-wait-message` | `GOWAIT_WAIT_MESSAGE` | localized | Waiting page explanation paragraph |
+| `-wait-template` | `GOWAIT_WAIT_TEMPLATE` | embedded | Path to a custom waiting page template |
+
+## Waiting page customization
+
+The embedded page ships in English and French (`-wait-lang fr`), and the
+title, brand, and message are configurable without touching HTML:
+
+```sh
+gowait -backend http://backend:8080 \
+  -wait-lang fr -wait-brand "ACME Billetterie" -wait-title "Forte affluence"
+```
+
+For full control, `-wait-template` replaces the embedded page with your own
+Go [`html/template`](https://pkg.go.dev/html/template). It receives:
+
+| Field | Meaning |
+|---|---|
+| `{{.Lang}}` | Page language (`en`, `fr`) |
+| `{{.Title}}` | Title (custom or localized default) |
+| `{{.Brand}}` | Brand name (empty if unset) |
+| `{{.Message}}` | Explanation paragraph (custom or localized default) |
+| `{{.PollMs}}` | Poll interval in milliseconds |
+| `{{.L}}` | Localized strings: `.EtaLabel`, `.Notice`, `.LessMinute`, `.Minute`, `.Minutes`, `.Position`, `.Updated` |
+
+Use [the embedded page](internal/waitpage/wait.html) as a starting point —
+its script polls `/gowait/status` and reloads once admitted, which any custom
+page should keep doing. The template is rendered **once at startup** (bad
+templates fail fast, and per-request cost stays zero) and must stay
+self-contained: no external assets, so it renders even when everything else
+is on fire.
 
 ## Endpoints
 

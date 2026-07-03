@@ -42,7 +42,14 @@ type Server struct {
 // New builds the full gowait handler. now may be nil (defaults to time.Now);
 // reg may be nil (no metrics).
 func New(cfg *config.Config, ctrl *queue.Controller, signer *ticket.Signer, now func() time.Time, reg *metrics.Registry) (*Server, error) {
-	html, err := waitpage.Render(cfg.PollInterval)
+	html, err := waitpage.Render(waitpage.Options{
+		PollInterval: cfg.PollInterval,
+		Lang:         cfg.WaitLang,
+		Title:        cfg.WaitTitle,
+		Brand:        cfg.WaitBrand,
+		Message:      cfg.WaitMessage,
+		TemplatePath: cfg.WaitTemplate,
+	})
 	if err != nil {
 		return nil, err
 	}
