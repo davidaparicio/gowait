@@ -301,14 +301,16 @@ kubectl apply -k deploy/k8s
 ## Development
 
 ```sh
-make test    # go test ./... -race
+make test        # go test ./... -race
 make vet
-make demo    # docker compose up --build
+make demo        # docker compose up --build
+make loadtest    # k6 rush scenario, see docs/LOADTEST.md
 ```
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md): Prometheus metrics, admin API (live
-capacity changes, queue flush), multi-replica + Kubernetes manifests, waiting
-page branding/i18n, adaptive capacity via backend health probing, load
-testing. The seams are already in place.
+All eight phases of [docs/ROADMAP.md](docs/ROADMAP.md) have shipped:
+Prometheus metrics, admin API (live capacity changes, queue flush),
+multi-replica + Kubernetes manifests, waiting page branding/i18n, adaptive
+capacity via backend health probing, and k6 load testing with the tuning it
+motivated ([docs/LOADTEST.md](docs/LOADTEST.md)).

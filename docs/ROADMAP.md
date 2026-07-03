@@ -77,13 +77,16 @@ bounds with AIMD (halve on failure, +1 after 3 consecutive successes) via the
 Phase 2 mechanism. In Valkey mode a `SET NX PX` lock (the new optional
 `store.Locker` interface) ensures one adjuster per interval across replicas.
 
-## Phase 8 — Load test + tuning
+## Phase 8 — Load test + tuning ✅
 
-- k6 scenario (per-VU cookie jars = thousands of distinct waiters): measure
-  time-to-admission, status-endpoint latency, and FIFO fairness.
-- Data-driven fixes only: the memory store's O(n) position lookup (sequence
-  counters), and the Valkey store's per-request round trips (skip per-request
-  reconcile, cache ETA stats one poll interval).
+- k6 scenario (`loadtest/waitingroom.js`, per-VU cookie jars = thousands of
+  distinct waiters): measures time-to-admission, status-endpoint latency, and
+  FIFO fairness. Results in [docs/LOADTEST.md](LOADTEST.md).
+- Data-driven fixes shipped: the memory store's O(n) position lookup became
+  sequence counters (88.5µs → 37ns per lookup at 100k queued), and the Valkey
+  store's per-request round trips dropped 3 → 1 via a request-reconcile
+  throttle + one-poll-interval ETA stats cache (status p95 44.6 → 24.1ms).
+  Both are controller options, active only in valkey mode.
 
 ## Cross-cutting: `store.Store` interface changes
 

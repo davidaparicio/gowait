@@ -34,14 +34,34 @@ type Config struct {
 	Capacity  int
 	ActiveTTL time.Duration
 	QueueTTL  time.Duration
+
+	// MinReconcileGap rate-limits request-triggered reconciles: once one has
+	// run, requests within the gap skip theirs. 0 reconciles on every request.
+	// Set it for remote stores, where each reconcile is a network round trip
+	// and a server-side scan; the janitor still guarantees one per tick, so
+	// promotions lag by at most the gap. FIFO order is unaffected.
+	MinReconcileGap time.Duration
+
+	// StatsCacheTTL caches store stats for ETA computation, saving one store
+	// round trip per queued status poll. 0 fetches fresh stats every time.
+	// The ETA only needs the session-duration EMA, which moves slowly; the
+	// waiting page's poll interval is the natural TTL.
+	StatsCacheTTL time.Duration
 }
 
 type Controller struct {
-	store    store.Store
-	cfg      Config
-	capacity atomic.Int64
-	now      func() time.Time
-	metrics  *metrics.Registry // nil-safe; set before serving
+	store         store.Store
+	cfg           Config
+	capacity      atomic.Int64
+	now           func() time.Time
+	metrics       *metrics.Registry // nil-safe; set before serving
+	lastReconcile atomic.Int64      // unixnano of the newest reconcile
+	statsCache    atomic.Pointer[cachedStats]
+}
+
+type cachedStats struct {
+	stats store.Stats
+	at    time.Time
 }
 
 // New creates a Controller. now may be nil, in which case time.Now is used.
@@ -101,9 +121,24 @@ func (c *Controller) refreshCapacity(ctx context.Context) {
 	}
 }
 
+// maybeReconcile is the request-path entry: it honors MinReconcileGap so a
+// crowd of pollers doesn't hammer the store with redundant reconciles. The
+// CAS picks one winner per gap; losers proceed with slightly stale state,
+// which the janitor bounds to one tick.
+func (c *Controller) maybeReconcile(ctx context.Context, now time.Time) error {
+	if gap := c.cfg.MinReconcileGap; gap > 0 {
+		last := c.lastReconcile.Load()
+		if now.UnixNano()-last < int64(gap) || !c.lastReconcile.CompareAndSwap(last, now.UnixNano()) {
+			return nil
+		}
+	}
+	return c.reconcile(ctx, now)
+}
+
 // reconcile cranks the store's state machine and feeds the metrics registry
-// with what happened — the single funnel for all three call sites.
+// with what happened — the single funnel for all call sites.
 func (c *Controller) reconcile(ctx context.Context, now time.Time) error {
+	c.lastReconcile.Store(now.UnixNano())
 	res, err := c.store.Reconcile(ctx, c.Capacity(), c.cfg.ActiveTTL, c.cfg.QueueTTL, now)
 	if err != nil {
 		return err
@@ -119,7 +154,7 @@ func (c *Controller) reconcile(ctx context.Context, now time.Time) error {
 // reconcile, then admit/touch/enqueue the ticket as appropriate.
 func (c *Controller) Check(ctx context.Context, ticketID string) (Result, error) {
 	now := c.now()
-	if err := c.reconcile(ctx, now); err != nil {
+	if err := c.maybeReconcile(ctx, now); err != nil {
 		return Result{}, err
 	}
 
@@ -159,7 +194,7 @@ func (c *Controller) Check(ctx context.Context, ticketID string) (Result, error)
 // heartbeat), but never enqueues.
 func (c *Controller) StatusOf(ctx context.Context, ticketID string) (Result, error) {
 	now := c.now()
-	if err := c.reconcile(ctx, now); err != nil {
+	if err := c.maybeReconcile(ctx, now); err != nil {
 		return Result{}, err
 	}
 	snap, err := c.store.Lookup(ctx, ticketID, now)
@@ -223,11 +258,31 @@ func (c *Controller) result(ctx context.Context, d Decision, snap store.Snapshot
 
 // eta estimates the wait as position × avgSession / capacity: slots drain at
 // roughly capacity/avgSession per second. Falls back to ActiveTTL when no
-// session has completed yet. An estimate, not a promise.
+// session has completed yet. An estimate, not a promise — which is why a
+// briefly cached EMA (see etaStats) is good enough.
 func (c *Controller) eta(ctx context.Context, position int) time.Duration {
 	avg := c.cfg.ActiveTTL
-	if stats, err := c.store.Stats(ctx); err == nil && stats.AvgSessionSecs > 0 {
+	if stats, err := c.etaStats(ctx); err == nil && stats.AvgSessionSecs > 0 {
 		avg = time.Duration(stats.AvgSessionSecs * float64(time.Second))
 	}
 	return time.Duration(position) * avg / time.Duration(c.Capacity())
+}
+
+// etaStats returns store stats for ETA math, cached for StatsCacheTTL. Stats
+// (the exported method, backing metrics and the admin API) stays uncached.
+func (c *Controller) etaStats(ctx context.Context) (store.Stats, error) {
+	ttl := c.cfg.StatsCacheTTL
+	if ttl <= 0 {
+		return c.store.Stats(ctx)
+	}
+	now := c.now()
+	if p := c.statsCache.Load(); p != nil && now.Sub(p.at) < ttl {
+		return p.stats, nil
+	}
+	stats, err := c.store.Stats(ctx)
+	if err != nil {
+		return stats, err
+	}
+	c.statsCache.Store(&cachedStats{stats: stats, at: now})
+	return stats, nil
 }

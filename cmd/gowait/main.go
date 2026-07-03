@@ -71,11 +71,19 @@ func run() error {
 		st = memory.New()
 	}
 
-	ctrl := queue.New(st, queue.Config{
+	qcfg := queue.Config{
 		Capacity:  cfg.Capacity,
 		ActiveTTL: cfg.InactivityTTL,
 		QueueTTL:  cfg.QueueTTL,
-	}, nil)
+	}
+	if cfg.Store == "valkey" {
+		// Every reconcile and stats read is a network round trip here; a
+		// crowd of pollers doesn't need thousands of identical ones per
+		// second. Memory-store reconciles are a mutex grab — not worth gating.
+		qcfg.MinReconcileGap = 250 * time.Millisecond
+		qcfg.StatsCacheTTL = cfg.PollInterval
+	}
+	ctrl := queue.New(st, qcfg, nil)
 
 	var reg *metrics.Registry
 	if cfg.Metrics {

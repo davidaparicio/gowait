@@ -257,3 +257,99 @@ func TestJanitorPromotesWithoutTraffic(t *testing.T) {
 		}
 	}
 }
+
+// countingStore wraps a memory store, counting the expensive calls that the
+// throttle/cache exist to save.
+type countingStore struct {
+	*memory.Store
+	reconciles int
+	stats      int
+}
+
+func (c *countingStore) Reconcile(ctx context.Context, capacity int, activeTTL, queueTTL time.Duration, now time.Time) (store.ReconcileResult, error) {
+	c.reconciles++
+	return c.Store.Reconcile(ctx, capacity, activeTTL, queueTTL, now)
+}
+
+func (c *countingStore) Stats(ctx context.Context) (store.Stats, error) {
+	c.stats++
+	return c.Store.Stats(ctx)
+}
+
+func TestMinReconcileGapThrottlesRequests(t *testing.T) {
+	ctx := context.Background()
+	clk := &fakeClock{t: time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)}
+	st := &countingStore{Store: memory.New()}
+	ctrl := New(st, Config{
+		Capacity:        1,
+		ActiveTTL:       60 * time.Second,
+		QueueTTL:        30 * time.Second,
+		MinReconcileGap: 250 * time.Millisecond,
+	}, clk.now)
+
+	ctrl.Check(ctx, "a")
+	if st.reconciles != 1 {
+		t.Fatalf("reconciles after first request = %d, want 1", st.reconciles)
+	}
+	for i := 0; i < 5; i++ {
+		ctrl.StatusOf(ctx, "a") // same instant: all within the gap
+	}
+	if st.reconciles != 1 {
+		t.Fatalf("reconciles after burst = %d, want 1 (gap must throttle)", st.reconciles)
+	}
+	clk.advance(300 * time.Millisecond)
+	ctrl.StatusOf(ctx, "a")
+	if st.reconciles != 2 {
+		t.Fatalf("reconciles after gap elapsed = %d, want 2", st.reconciles)
+	}
+}
+
+func TestZeroGapReconcilesEveryRequest(t *testing.T) {
+	ctx := context.Background()
+	clk := &fakeClock{t: time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)}
+	st := &countingStore{Store: memory.New()}
+	ctrl := New(st, Config{Capacity: 1, ActiveTTL: 60 * time.Second, QueueTTL: 30 * time.Second}, clk.now)
+
+	ctrl.Check(ctx, "a")
+	ctrl.StatusOf(ctx, "a")
+	ctrl.StatusOf(ctx, "a")
+	if st.reconciles != 3 {
+		t.Fatalf("reconciles = %d, want 3 (gap 0 keeps v1 behavior)", st.reconciles)
+	}
+}
+
+func TestStatsCacheTTL(t *testing.T) {
+	ctx := context.Background()
+	clk := &fakeClock{t: time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)}
+	st := &countingStore{Store: memory.New()}
+	ctrl := New(st, Config{
+		Capacity:      1,
+		ActiveTTL:     60 * time.Second,
+		QueueTTL:      30 * time.Second,
+		StatsCacheTTL: 3 * time.Second,
+	}, clk.now)
+
+	ctrl.Check(ctx, "a") // admitted: no ETA, no stats read
+	ctrl.Check(ctx, "b") // queued: ETA reads stats once
+	if st.stats != 1 {
+		t.Fatalf("stats after first ETA = %d, want 1", st.stats)
+	}
+	ctrl.StatusOf(ctx, "b")
+	ctrl.StatusOf(ctx, "b")
+	if st.stats != 1 {
+		t.Fatalf("stats within TTL = %d, want 1 (cache must serve ETA)", st.stats)
+	}
+	clk.advance(4 * time.Second)
+	ctrl.StatusOf(ctx, "b")
+	if st.stats != 2 {
+		t.Fatalf("stats after TTL = %d, want 2", st.stats)
+	}
+
+	// The exported Stats (admin API, metrics) must stay uncached.
+	before := st.stats
+	ctrl.Stats(ctx)
+	ctrl.Stats(ctx)
+	if st.stats != before+2 {
+		t.Fatalf("exported Stats calls = %d, want %d (never cached)", st.stats-before, 2)
+	}
+}
